@@ -5,6 +5,7 @@ let currentInterval = '1m';
 let lastChartPayload = null;
 let chartAutoRefreshTimer = null;
 let stateRefreshTimer = null;
+let livePriceTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -97,6 +98,18 @@ function setSelectOptions(select, items, selectedValue) {
 function fmt(num, digits = 4) {
   if (num === null || num === undefined || Number.isNaN(Number(num))) return '-';
   return Number(num).toFixed(digits);
+}
+
+function intervalToSeconds(interval) {
+  const v = String(interval || '1m').trim().toLowerCase();
+  const m = v.match(/^(\\d+)([mhd])$/);
+  if (!m) return 60;
+  const amount = Number(m[1]);
+  const unit = m[2];
+  if (unit === 'm') return amount * 60;
+  if (unit === 'h') return amount * 3600;
+  if (unit === 'd') return amount * 86400;
+  return 60;
 }
 
 function fillConfig(cfg) {
@@ -275,6 +288,45 @@ function renderChartPayload(data, { fit = false } = {}) {
   }
 }
 
+async function refreshLivePrice() {
+  const symbol = currentSymbol || $('pairSelect').value;
+  if (!symbol || !lastChartPayload || !Array.isArray(lastChartPayload.candles) || !lastChartPayload.candles.length) return;
+  try {
+    const priceResp = await apiGet(`/api/price?symbol=${encodeURIComponent(symbol)}`);
+    const price = Number(priceResp.price);
+    if (!Number.isFinite(price) || price <= 0) return;
+
+    const candles = lastChartPayload.candles;
+    const prev = candles[candles.length - 1];
+    const intervalSec = intervalToSeconds(currentInterval || $('intervalSelect').value || '1m');
+    const nowSec = Math.floor(Date.now() / 1000);
+    const currentBucket = Math.floor(nowSec / intervalSec) * intervalSec;
+
+    let updated;
+    if (currentBucket > Number(prev.time)) {
+      updated = {
+        time: currentBucket,
+        open: Number(prev.close),
+        high: Math.max(Number(prev.close), price),
+        low: Math.min(Number(prev.close), price),
+        close: price,
+      };
+      candles.push(updated);
+    } else {
+      updated = {
+        ...prev,
+        high: Math.max(Number(prev.high), price),
+        low: Math.min(Number(prev.low), price),
+        close: price,
+      };
+      candles[candles.length - 1] = updated;
+    }
+    candleSeries.update(updated);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 async function refreshChart(fit = false) {
   const symbol = currentSymbol || $('pairSelect').value;
   if (!symbol) return;
@@ -328,11 +380,11 @@ function startAutoRefresh() {
   if (chartAutoRefreshTimer) clearInterval(chartAutoRefreshTimer);
   chartAutoRefreshTimer = setInterval(async () => {
     try {
-      await refreshAll();
+      await refreshChart();
     } catch (err) {
       console.error(err);
     }
-  }, 1000);
+  }, 3000);
 }
 
 function startStateRefresh() {
@@ -344,6 +396,13 @@ function startStateRefresh() {
       console.error(err);
     }
   }, 5000);
+}
+
+function startLivePriceRefresh() {
+  if (livePriceTimer) clearInterval(livePriceTimer);
+  livePriceTimer = setInterval(async () => {
+    await refreshLivePrice();
+  }, 1000);
 }
 
 async function handleBuy() {
@@ -412,4 +471,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   startAutoRefresh();
   startStateRefresh();
+  startLivePriceRefresh();
 });
