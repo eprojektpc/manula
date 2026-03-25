@@ -1,9 +1,10 @@
 let state = null;
 let candleChart, rsiChart, candleSeries, ema9Series, ema21Series, ema50Series, rsiSeries, rsi30Series, rsi70Series;
 let currentSymbol = null;
+let currentInterval = '1m';
 let lastChartPayload = null;
-let liveTickTimer = null;
-let fullRefreshTimer = null;
+let chartAutoRefreshTimer = null;
+let stateRefreshTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -278,34 +279,21 @@ async function refreshChart(fit = false) {
   const symbol = currentSymbol || $('pairSelect').value;
   if (!symbol) return;
   currentSymbol = symbol;
-    const interval = $('intervalSelect') ? $('intervalSelect').value : '1m';
+  const interval = $('intervalSelect') ? $('intervalSelect').value : currentInterval;
+  currentInterval = interval || '1m';
   $('chartTitle').textContent = `Wykres PRO · ${symbol} · ${interval}`;
   const data = await apiGet(`/api/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
   renderChartPayload(data, { fit });
 }
 
-async function refreshChartTick() {
-  const symbol = currentSymbol || $('pairSelect').value;
-  if (!symbol || !lastChartPayload || !Array.isArray(lastChartPayload.candles) || !lastChartPayload.candles.length) return;
-  try {
-    const tick = await apiGet(`/api/price?symbol=${encodeURIComponent(symbol)}`);
-    const price = Number(tick.price);
-    if (!Number.isFinite(price) || price <= 0) return;
-    const candles = lastChartPayload.candles.slice();
-    const last = { ...candles[candles.length - 1] };
-    last.high = Math.max(Number(last.high), price);
-    last.low = Math.min(Number(last.low), price);
-    last.close = price;
-    candles[candles.length - 1] = last;
-    candleSeries.setData(candles);
-  } catch (err) {
-    console.error(err);
-  }
+async function refreshAll({ fit = false } = {}) {
+  await loadState();
+  await refreshChart(fit);
 }
 
 async function loadSymbols(selected) {
   try {
-    const resp = await apiGet('/api/symbols');
+    const resp = await apiGet('/api/symbols/all');
     const symbols = Array.isArray(resp.symbols) ? resp.symbols : [];
     if (symbols.length) {
       setSelectOptions($('pairSelect'), symbols, selected || currentSymbol || $('pairSelect').value);
@@ -334,6 +322,28 @@ async function loadState() {
 
   const history = await apiGet('/api/scans/history?limit=50');
   renderScanHistory(history);
+}
+
+function startAutoRefresh() {
+  if (chartAutoRefreshTimer) clearInterval(chartAutoRefreshTimer);
+  chartAutoRefreshTimer = setInterval(async () => {
+    try {
+      await refreshAll();
+    } catch (err) {
+      console.error(err);
+    }
+  }, 1000);
+}
+
+function startStateRefresh() {
+  if (stateRefreshTimer) clearInterval(stateRefreshTimer);
+  stateRefreshTimer = setInterval(async () => {
+    try {
+      await loadState();
+    } catch (err) {
+      console.error(err);
+    }
+  }, 5000);
 }
 
 async function handleBuy() {
@@ -379,7 +389,7 @@ async function handleRunScan() {
   try {
     await apiPost('/api/scan/run', {});
     showFlash('Ręczny scan wyzwolony.');
-    setTimeout(async () => { await loadState(); await loadSymbols(currentSymbol); }, 1200);
+    setTimeout(async () => { await refreshAll(); }, 1200);
   } catch (err) {
     showFlash(err.message, true);
   }
@@ -391,27 +401,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('sellBtn').addEventListener('click', handleSell);
   $('saveSettingsBtn').addEventListener('click', handleSaveSettings);
   $('scanBtn').addEventListener('click', handleRunScan);
-  $('refreshBtn').addEventListener('click', async () => { await loadState(); await refreshChart(true); });
+  $('refreshBtn').addEventListener('click', async () => { await refreshAll({ fit: true }); });
   $('pairSelect').addEventListener('change', async () => { currentSymbol = $('pairSelect').value; await refreshChart(true); });
-  if ($('intervalSelect')) $('intervalSelect').addEventListener('change', async () => { await refreshChart(true); });
+  if ($('intervalSelect')) $('intervalSelect').addEventListener('change', async () => {
+    currentInterval = $('intervalSelect').value || '1m';
+    await refreshChart(true);
+  });
 
-  await loadState();
-  await refreshChart(true);
+  await refreshAll({ fit: true });
 
-  if (liveTickTimer) clearInterval(liveTickTimer);
-  if (fullRefreshTimer) clearInterval(fullRefreshTimer);
-  liveTickTimer = setInterval(async () => {
-    try {
-      await refreshChart(false);
-    } catch (err) {
-      console.error(err);
-    }
-  }, 1000);
-  fullRefreshTimer = setInterval(async () => {
-    try {
-      await loadState();
-    } catch (err) {
-      console.error(err);
-    }
-  }, 5000);
+  startAutoRefresh();
+  startStateRefresh();
 });
