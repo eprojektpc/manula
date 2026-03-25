@@ -333,8 +333,16 @@ function applyRealtimeChartUpdate(nextData) {
   const prevCandles = lastChartPayload.candles;
   const nextCandles = nextData.candles;
   const prevLastTs = Number(prevCandles[prevCandles.length - 1].time);
-  const incrementalCandles = nextCandles.filter((row) => Number(row.time) >= prevLastTs);
-  incrementalCandles.forEach((row) => candleSeries.update(row));
+  const last = nextCandles[nextCandles.length - 1];
+  const normalizedLast = {
+    time: Number(last.time),
+    open: Number(last.open),
+    high: Number(last.high),
+    low: Number(last.low),
+    close: Number(last.close),
+  };
+  candleSeries.update(normalizedLast);
+  console.log('CANDLE UPDATE API', normalizedLast);
 
   lastChartPayload = {
     ...lastChartPayload,
@@ -359,7 +367,7 @@ function applyRealtimeChartUpdate(nextData) {
   console.debug('[chart] realtime payload received', {
     prevLastTs,
     nextLastTs: nextCandles.length ? Number(nextCandles[nextCandles.length - 1].time) : null,
-    appliedCandles: incrementalCandles.length,
+    appliedCandles: 1,
   });
   scrollToRealTime();
 }
@@ -400,7 +408,32 @@ async function refreshLivePrice() {
       candles[candles.length - 1] = updated;
     }
 
-    candleSeries.update(updated);
+    const normalizedUpdated = {
+      time: Number(updated.time),
+      open: Number(updated.open),
+      high: Number(updated.high),
+      low: Number(updated.low),
+      close: Number(updated.close),
+    };
+
+    candleSeries.update(normalizedUpdated);
+    console.log('CANDLE UPDATE PRICE', normalizedUpdated);
+
+    candleChart.timeScale().scrollToRealTime();
+    rsiChart.timeScale().scrollToRealTime();
+
+    const lastPayloadTs = Number(lastChartPayload.candles[lastChartPayload.candles.length - 1].time);
+    if (currentBucket === lastPayloadTs) {
+      const fallbackUpdated = {
+        ...normalizedUpdated,
+        time: lastPayloadTs,
+      };
+      candleSeries.update(fallbackUpdated);
+      console.log('CANDLE UPDATE PRICE', fallbackUpdated);
+      candles[candles.length - 1] = fallbackUpdated;
+      updated = fallbackUpdated;
+    }
+
     setDebugValue('debugLastCandleTime', updated.time);
     setDebugValue('debugLastCandleClose', updated.close);
     setDebugValue('debugClientTs', new Date().toLocaleTimeString());
