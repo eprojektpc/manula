@@ -349,15 +349,9 @@ function applyRealtimeChartUpdate(nextData) {
   const nextCandles = normalizeCandles(nextData.candles);
   const prevLastTs = Number(prevCandles[prevCandles.length - 1].time);
   const last = nextCandles[nextCandles.length - 1];
-  const normalizedLast = {
-    time: Number(last.time),
-    open: Number(last.open),
-    high: Number(last.high),
-    low: Number(last.low),
-    close: Number(last.close),
-  };
-  candleSeries.update(normalizedLast);
-  console.log('CANDLE UPDATE API', normalizedLast);
+  if (!last) return;
+  candleSeries.update(last);
+  console.log('CANDLE UPDATE API', last);
 
   lastChartPayload = {
     ...lastChartPayload,
