@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manual Scalp Panel</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <h1>Manual Scalp Panel</h1>
+        <p>Wykres PRO + manualny BUY/SELL + TP/SL auto + cykliczny screener pre-breakout.</p>
+      </div>
+      <div class="status-box">
+        <div><strong>Status:</strong> <span id="scanStatus">-</span></div>
+        <div><strong>Ostatni scan:</strong> <span id="lastScan">-</span></div>
+        <div><strong>Następny:</strong> <span id="nextScan">-</span></div>
+      </div>
+    </header>
+
+    <section class="toolbar panel">
+      <div class="controls-grid">
+        <label>Para
+          <select id="pairSelect"></select>
+        </label>
+        <label>Slot
+          <select id="slotSelect"></select>
+        </label>
+        <label>Budżet
+          <input id="budgetInput" type="number" step="0.01">
+        </label>
+        <label>TP %
+          <input id="tpInput" type="number" step="0.01">
+        </label>
+        <label>SL %
+          <input id="slInput" type="number" step="0.01">
+        </label>
+      </div>
+      <div class="button-row">
+        <button class="primary" id="buyBtn">BUY</button>
+        <button class="danger" id="sellBtn">SELL slot</button>
+        <button id="scanBtn">Skanuj teraz</button>
+        <button id="refreshBtn">Odśwież</button>
+      </div>
+      <div id="flash" class="flash"></div>
+    </section>
+
+    <section class="layout-main">
+      <div class="charts-wrap panel">
+        <div class="charts-header">
+          <h2 id="chartTitle">Wykres</h2>
+          <div class="legend">
+            <span class="pill green">EMA 9</span>
+            <span class="pill blue">EMA 21</span>
+            <span class="pill gold">EMA 50</span>
+            <span class="pill purple">RSI</span>
+            <span class="pill white">Entry marker</span>
+          </div>
+        </div>
+        <div id="candleChart" class="chart"></div>
+        <div id="rsiChart" class="chart rsi"></div>
+      </div>
+
+      <div class="side-stack">
+        <section class="panel">
+          <h2>Top 2 skanera</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>Para</th><th>Score</th><th>Gap %</th><th>RSI</th><th>Vol</th>
+              </tr>
+            </thead>
+            <tbody id="candidatesBody"></tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <h2>Otwarte pozycje</h2>
+          <div id="positionsCards" class="cards"></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel">
+      <details open>
+        <summary><strong>Ustawienia skanera i tradingu</strong></summary>
+        <div class="settings-grid">
+          <label>Quote asset <input id="cfg_quote_asset" type="text"></label>
+          <label>Scan interval (sek) <input id="cfg_scan_interval_sec" type="number"></label>
+          <label>Top pairs <input id="cfg_top_pairs" type="number"></label>
+          <label>Top volume limit <input id="cfg_top_volume_limit" type="number"></label>
+          <label>Min quote volume <input id="cfg_min_quote_volume" type="number" step="0.01"></label>
+          <label>Lookback high bars <input id="cfg_lookback_high_bars" type="number"></label>
+          <label>Lookback low bars <input id="cfg_lookback_low_bars" type="number"></label>
+          <label>Min gap breakout % <input id="cfg_min_distance_to_breakout_pct" type="number" step="0.01"></label>
+          <label>Max gap breakout % <input id="cfg_max_distance_to_breakout_pct" type="number" step="0.01"></label>
+          <label>Min vol ratio <input id="cfg_min_vol_ratio" type="number" step="0.01"></label>
+          <label>RSI min <input id="cfg_rsi_min" type="number" step="0.1"></label>
+          <label>RSI max <input id="cfg_rsi_max" type="number" step="0.1"></label>
+          <label>EMA spread min % <input id="cfg_ema_spread_min_pct" type="number" step="0.01"></label>
+          <label>ATR min % <input id="cfg_atr_pct_min" type="number" step="0.01"></label>
+          <label>ATR max % <input id="cfg_atr_pct_max" type="number" step="0.01"></label>
+          <label>Range position min <input id="cfg_min_range_position" type="number" step="0.01"></label>
+          <label>Range position max <input id="cfg_max_range_position" type="number" step="0.01"></label>
+          <label>Max change 1m % <input id="cfg_max_change_1m_pct" type="number" step="0.01"></label>
+          <label>Max change 3m % <input id="cfg_max_change_3m_pct" type="number" step="0.01"></label>
+          <label>Min MACD hist <input id="cfg_min_macd_hist" type="number" step="0.01"></label>
+          <label>Workers <input id="cfg_workers" type="number"></label>
+          <label>Domyślny budżet <input id="cfg_default_budget" type="number" step="0.01"></label>
+          <label>Slot count <input id="cfg_slot_count" type="number"></label>
+          <label>TP % default <input id="cfg_tp_pct" type="number" step="0.01"></label>
+          <label>SL % default <input id="cfg_sl_pct" type="number" step="0.01"></label>
+          <label>Monitor interval sec <input id="cfg_monitor_interval_sec" type="number"></label>
+          <label>Scanner enabled
+            <select id="cfg_enabled"><option value="true">Tak</option><option value="false">Nie</option></select>
+          </label>
+          <label class="wide">Blacklist (CSV)
+            <input id="cfg_blacklist" type="text" placeholder="BTCUSDC, ETHUSDC">
+          </label>
+        </div>
+        <div class="button-row top-gap">
+          <button class="primary" id="saveSettingsBtn">Zapisz ustawienia</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Historia trade</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Czas</th><th>Slot</th><th>Para</th><th>Side</th><th>Price</th><th>Qty</th><th>PnL %</th><th>PnL</th><th>Reason</th>
+          </tr>
+        </thead>
+        <tbody id="tradesBody"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Historia skanera</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Czas</th><th>#</th><th>Para</th><th>Score</th><th>Gap %</th><th>RSI</th><th>Vol</th><th>3m %</th><th>ATR %</th><th>Trend</th>
+          </tr>
+        </thead>
+        <tbody id="scanHistoryBody"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
