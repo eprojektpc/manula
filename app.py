@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import threading
 import time
@@ -269,9 +270,29 @@ def default_symbol() -> str:
     return f'BTC{cfg["trading"]["quote_asset"]}'
 
 
+def _asset_version(filename: str) -> int:
+    try:
+        path = os.path.join(app.static_folder or 'static', filename)
+        return int(os.path.getmtime(path))
+    except Exception:
+        return int(time.time())
+
+
+@app.after_request
+def add_no_cache_headers(response):
+    if request.path == '/' or request.path.endswith('.html'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template(
+        'index.html',
+        asset_version=max(_asset_version('app.js'), _asset_version('style.css')),
+    )
 
 
 @app.route('/api/settings', methods=['GET', 'POST'])
@@ -317,9 +338,20 @@ def api_candles():
                 'text': f"ENTRY S{pos['slot']} @ {float(pos['entry_price']):.6f}",
             })
     payload['markers'] = markers
+    candles = payload.get('candles') or []
+    last_candle = candles[-1] if candles else {}
+    payload['debug'] = {
+        'server_ts': time.time(),
+        'candle_count': len(candles),
+        'last_candle_time': last_candle.get('time'),
+        'last_candle_close': last_candle.get('close'),
+        'symbol': symbol,
+        'interval': interval,
+    }
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     return response
 
 
@@ -329,6 +361,7 @@ def api_price():
     response = jsonify({'symbol': symbol, 'price': float(get_price(symbol) or 0.0), 'ts': time.time()})
     response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     return response
 
 

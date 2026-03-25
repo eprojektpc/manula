@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Manual Scalp Panel</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}">
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -71,6 +74,14 @@
         </div>
         <div id="candleChart" class="chart"></div>
         <div id="rsiChart" class="chart rsi"></div>
+        <div id="chartDebugBox" class="chart-debug-box">
+          <div><strong>Chart debug</strong></div>
+          <div>Status: <span id="debugPollingStatus">idle</span></div>
+          <div>Last fetch: <span id="debugLastFetch">-</span></div>
+          <div>Server ts: <span id="debugServerTs">-</span></div>
+          <div>Last candle time: <span id="debugLastCandleTime">-</span></div>
+          <div>Last candle close: <span id="debugLastCandleClose">-</span></div>
+        </div>
       </div>
 
       <div class="side-stack">
@@ -161,6 +172,6 @@
     </section>
   </div>
 
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>

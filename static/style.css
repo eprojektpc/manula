@@ -10,6 +10,28 @@
   --purple: #a855f7;
   --red: #ef4444;
 }
+.chart-debug-box {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  background: rgba(8, 15, 35, 0.75);
+  color: #dbeafe;
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 320px;
+}
+
+.chart-debug-box strong {
+  display: inline-block;
+  margin-bottom: 4px;
+  color: #ffffff;
+}
+
+.chart-debug-box span {
+  color: #93c5fd;
+}
+
 * { box-sizing: border-box; }
 body {
   margin: 0;
