@@ -1,3 +1,4 @@
+console.log('NOWA WERSJA APP JS 🔥🔥🔥');
 let state = null;
 let candleChart, rsiChart, candleSeries, ema9Series, ema21Series, ema50Series, rsiSeries, rsi30Series, rsi70Series;
 let currentSymbol = null;
