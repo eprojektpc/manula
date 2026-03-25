@@ -3,9 +3,9 @@ let candleChart, rsiChart, candleSeries, ema9Series, ema21Series, ema50Series, r
 let currentSymbol = null;
 let currentInterval = '1m';
 let lastChartPayload = null;
-let chartAutoRefreshTimer = null;
+let chartPollingTimer = null;
 let stateRefreshTimer = null;
-let livePriceTimer = null;
+let chartPollingInFlight = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -98,18 +98,6 @@ function setSelectOptions(select, items, selectedValue) {
 function fmt(num, digits = 4) {
   if (num === null || num === undefined || Number.isNaN(Number(num))) return '-';
   return Number(num).toFixed(digits);
-}
-
-function intervalToSeconds(interval) {
-  const v = String(interval || '1m').trim().toLowerCase();
-  const m = v.match(/^(\\d+)([mhd])$/);
-  if (!m) return 60;
-  const amount = Number(m[1]);
-  const unit = m[2];
-  if (unit === 'm') return amount * 60;
-  if (unit === 'h') return amount * 3600;
-  if (unit === 'd') return amount * 86400;
-  return 60;
 }
 
 function fillConfig(cfg) {
@@ -288,43 +276,61 @@ function renderChartPayload(data, { fit = false } = {}) {
   }
 }
 
-async function refreshLivePrice() {
-  const symbol = currentSymbol || $('pairSelect').value;
-  if (!symbol || !lastChartPayload || !Array.isArray(lastChartPayload.candles) || !lastChartPayload.candles.length) return;
-  try {
-    const priceResp = await apiGet(`/api/price?symbol=${encodeURIComponent(symbol)}`);
-    const price = Number(priceResp.price);
-    if (!Number.isFinite(price) || price <= 0) return;
-
-    const candles = lastChartPayload.candles;
-    const prev = candles[candles.length - 1];
-    const intervalSec = intervalToSeconds(currentInterval || $('intervalSelect').value || '1m');
-    const nowSec = Math.floor(Date.now() / 1000);
-    const currentBucket = Math.floor(nowSec / intervalSec) * intervalSec;
-
-    let updated;
-    if (currentBucket > Number(prev.time)) {
-      updated = {
-        time: currentBucket,
-        open: Number(prev.close),
-        high: Math.max(Number(prev.close), price),
-        low: Math.min(Number(prev.close), price),
-        close: price,
-      };
-      candles.push(updated);
-    } else {
-      updated = {
-        ...prev,
-        high: Math.max(Number(prev.high), price),
-        low: Math.min(Number(prev.low), price),
-        close: price,
-      };
-      candles[candles.length - 1] = updated;
-    }
-    candleSeries.update(updated);
-  } catch (err) {
-    console.error(err);
+function updateLineRealtime(series, prevLine, nextLine, label) {
+  if (!Array.isArray(nextLine) || !nextLine.length) return prevLine || [];
+  if (!Array.isArray(prevLine) || !prevLine.length) {
+    series.setData(nextLine);
+    return [...nextLine];
   }
+  const prevLast = prevLine[prevLine.length - 1];
+  const prevLastTs = Number(prevLast.time);
+  const incremental = nextLine.filter((item) => Number(item.time) >= prevLastTs);
+  incremental.forEach((item) => series.update(item));
+  const nextLast = nextLine[nextLine.length - 1];
+  console.debug(`[chart] ${label} updated`, {
+    points: incremental.length,
+    prevLast: prevLastTs,
+    nextLast: Number(nextLast.time),
+  });
+  return [...nextLine];
+}
+
+function applyRealtimeChartUpdate(nextData) {
+  if (!nextData || !Array.isArray(nextData.candles) || !nextData.candles.length) return;
+  if (!lastChartPayload || !Array.isArray(lastChartPayload.candles) || !lastChartPayload.candles.length) {
+    renderChartPayload(nextData, { fit: false });
+    return;
+  }
+
+  const prevCandles = lastChartPayload.candles;
+  const nextCandles = nextData.candles;
+  const prevLastTs = Number(prevCandles[prevCandles.length - 1].time);
+  const incrementalCandles = nextCandles.filter((row) => Number(row.time) >= prevLastTs);
+  incrementalCandles.forEach((row) => candleSeries.update(row));
+
+  console.debug('[chart] realtime payload', {
+    receivedCandles: nextCandles.length,
+    appliedCandles: incrementalCandles.length,
+    prevLastCandleTs: prevLastTs,
+    nextLastCandleTs: Number(nextCandles[nextCandles.length - 1].time),
+  });
+
+  lastChartPayload = {
+    ...lastChartPayload,
+    ...nextData,
+    candles: [...nextCandles],
+    ema9: updateLineRealtime(ema9Series, lastChartPayload.ema9, nextData.ema9, 'ema9'),
+    ema21: updateLineRealtime(ema21Series, lastChartPayload.ema21, nextData.ema21, 'ema21'),
+    ema50: updateLineRealtime(ema50Series, lastChartPayload.ema50, nextData.ema50, 'ema50'),
+    rsi: updateLineRealtime(rsiSeries, lastChartPayload.rsi, nextData.rsi, 'rsi'),
+    markers: nextData.markers || [],
+  };
+  candleSeries.setMarkers(lastChartPayload.markers);
+  const rsi30 = (lastChartPayload.rsi || []).map((x) => ({ time: x.time, value: 30 }));
+  const rsi70 = (lastChartPayload.rsi || []).map((x) => ({ time: x.time, value: 70 }));
+  rsi30Series.setData(rsi30);
+  rsi70Series.setData(rsi70);
+  console.debug('[chart] series.update() applied');
 }
 
 async function refreshChart(fit = false) {
@@ -336,6 +342,21 @@ async function refreshChart(fit = false) {
   $('chartTitle').textContent = `Wykres PRO · ${symbol} · ${interval}`;
   const data = await apiGet(`/api/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
   renderChartPayload(data, { fit });
+}
+
+async function refreshChartRealtime() {
+  const symbol = currentSymbol || $('pairSelect').value;
+  if (!symbol || chartPollingInFlight) return;
+  const interval = $('intervalSelect') ? $('intervalSelect').value : currentInterval;
+  chartPollingInFlight = true;
+  try {
+    const data = await apiGet(`/api/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
+    applyRealtimeChartUpdate(data);
+  } catch (err) {
+    console.error('[chart] polling error', err);
+  } finally {
+    chartPollingInFlight = false;
+  }
 }
 
 async function refreshAll({ fit = false } = {}) {
@@ -376,17 +397,6 @@ async function loadState() {
   renderScanHistory(history);
 }
 
-function startAutoRefresh() {
-  if (chartAutoRefreshTimer) clearInterval(chartAutoRefreshTimer);
-  chartAutoRefreshTimer = setInterval(async () => {
-    try {
-      await refreshAll();
-    } catch (err) {
-      console.error(err);
-    }
-  }, 3000);
-}
-
 function startStateRefresh() {
   if (stateRefreshTimer) clearInterval(stateRefreshTimer);
   stateRefreshTimer = setInterval(async () => {
@@ -398,10 +408,19 @@ function startStateRefresh() {
   }, 5000);
 }
 
-function startLivePriceRefresh() {
-  if (livePriceTimer) clearInterval(livePriceTimer);
-  livePriceTimer = setInterval(async () => {
-    await refreshLivePrice();
+function stopChartPolling() {
+  if (chartPollingTimer) {
+    clearInterval(chartPollingTimer);
+    chartPollingTimer = null;
+    console.debug('[chart] polling stopped');
+  }
+}
+
+function startChartPolling() {
+  stopChartPolling();
+  console.debug('[chart] polling started (1000ms)');
+  chartPollingTimer = setInterval(async () => {
+    await refreshChartRealtime();
   }, 1000);
 }
 
@@ -461,15 +480,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('saveSettingsBtn').addEventListener('click', handleSaveSettings);
   $('scanBtn').addEventListener('click', handleRunScan);
   $('refreshBtn').addEventListener('click', async () => { await refreshAll({ fit: true }); });
-  $('pairSelect').addEventListener('change', async () => { currentSymbol = $('pairSelect').value; await refreshChart(true); });
+  $('pairSelect').addEventListener('change', async () => {
+    currentSymbol = $('pairSelect').value;
+    await refreshChart(true);
+    startChartPolling();
+  });
   if ($('intervalSelect')) $('intervalSelect').addEventListener('change', async () => {
     currentInterval = $('intervalSelect').value || '1m';
     await refreshChart(true);
+    startChartPolling();
   });
 
   await refreshAll({ fit: true });
 
-  startAutoRefresh();
+  startChartPolling();
   startStateRefresh();
-  startLivePriceRefresh();
 });
