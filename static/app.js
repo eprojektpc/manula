@@ -380,7 +380,7 @@ function startAutoRefresh() {
   if (chartAutoRefreshTimer) clearInterval(chartAutoRefreshTimer);
   chartAutoRefreshTimer = setInterval(async () => {
     try {
-      await refreshChart();
+      await refreshAll();
     } catch (err) {
       console.error(err);
     }
