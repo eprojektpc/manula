@@ -250,17 +250,31 @@ def build_chart_payload(symbol: str, interval: str = '1m', limit: int = 220) -> 
     rsi_line = []
     for pos, row in enumerate(df.itertuples(index=False)):
         ts = int(row.open_time.timestamp())
+        o = float(row.open)
+        h = float(row.high)
+        l = float(row.low)
+        c = float(row.close)
+        if not all(math.isfinite(v) for v in (o, h, l, c)):
+            continue
         candles.append({
             'time': ts,
-            'open': float(row.open),
-            'high': float(row.high),
-            'low': float(row.low),
-            'close': float(row.close),
+            'open': o,
+            'high': h,
+            'low': l,
+            'close': c,
         })
-        ema9_line.append({'time': ts, 'value': round(float(ema9.iloc[pos]), 8)})
-        ema21_line.append({'time': ts, 'value': round(float(ema21.iloc[pos]), 8)})
-        ema50_line.append({'time': ts, 'value': round(float(ema50.iloc[pos]), 8)})
-        rsi_line.append({'time': ts, 'value': round(float(rsi.iloc[pos]), 4)})
+        e9 = float(ema9.iloc[pos])
+        e21 = float(ema21.iloc[pos])
+        e50 = float(ema50.iloc[pos])
+        r = float(rsi.iloc[pos])
+        if math.isfinite(e9):
+            ema9_line.append({'time': ts, 'value': round(e9, 8)})
+        if math.isfinite(e21):
+            ema21_line.append({'time': ts, 'value': round(e21, 8)})
+        if math.isfinite(e50):
+            ema50_line.append({'time': ts, 'value': round(e50, 8)})
+        if math.isfinite(r):
+            rsi_line.append({'time': ts, 'value': round(r, 4)})
 
     return {
         'symbol': symbol,

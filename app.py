@@ -330,6 +330,14 @@ def api_price():
 def api_symbols():
     return jsonify({'symbols': list_symbols()})
 
+@app.route('/api/symbols/all')
+def api_symbols_all():
+    cfg = load_config()
+    quote_asset = str(cfg['trading']['quote_asset']).upper()
+    symbols = fetch_symbols(quote_asset)
+    symbols = sorted({str(sym).upper() for sym in symbols})
+    return jsonify({'symbols': symbols, 'quote_asset': quote_asset, 'count': len(symbols)})
+
 
 @app.route('/api/positions')
 def api_positions():
