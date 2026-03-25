@@ -280,7 +280,7 @@ def _asset_version(filename: str) -> int:
 
 @app.after_request
 def add_no_cache_headers(response):
-    if request.path == '/' or request.path.endswith('.html'):
+    if request.path == '/' or request.path.endswith('.html') or request.path.startswith('/api/'):
         response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -289,9 +289,10 @@ def add_no_cache_headers(response):
 
 @app.route('/')
 def index():
+    asset_version = max(_asset_version('app.js'), _asset_version('style.css'))
     return render_template(
         'index.html',
-        asset_version=max(_asset_version('app.js'), _asset_version('style.css')),
+        asset_version=asset_version,
     )
 
 
@@ -348,10 +349,14 @@ def api_candles():
         'symbol': symbol,
         'interval': interval,
     }
+    app.logger.debug(
+        "[/api/candles] symbol=%s interval=%s candle_count=%s last_time=%s",
+        symbol,
+        interval,
+        len(candles),
+        last_candle.get('time'),
+    )
     response = jsonify(payload)
-    response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
     return response
 
 
@@ -359,9 +364,6 @@ def api_candles():
 def api_price():
     symbol = str(request.args.get('symbol') or default_symbol()).upper()
     response = jsonify({'symbol': symbol, 'price': float(get_price(symbol) or 0.0), 'ts': time.time()})
-    response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
     return response
 
 

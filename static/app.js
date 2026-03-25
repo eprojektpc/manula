@@ -107,7 +107,7 @@ function fmt(num, digits = 4) {
   return Number(num).toFixed(digits);
 }
 
-function scrollChartsToRealtime() {
+function scrollToRealTime() {
   try {
     candleChart.timeScale().scrollToRealTime();
     rsiChart.timeScale().scrollToRealTime();
@@ -326,7 +326,7 @@ function applyRealtimeChartUpdate(nextData) {
   if (!nextData || !Array.isArray(nextData.candles) || !nextData.candles.length) return;
   if (!lastChartPayload || !Array.isArray(lastChartPayload.candles) || !lastChartPayload.candles.length) {
     renderChartPayload(nextData, { fit: false });
-    scrollChartsToRealtime();
+    scrollToRealTime();
     return;
   }
 
@@ -361,7 +361,7 @@ function applyRealtimeChartUpdate(nextData) {
     nextLastTs: nextCandles.length ? Number(nextCandles[nextCandles.length - 1].time) : null,
     appliedCandles: incrementalCandles.length,
   });
-  scrollChartsToRealtime();
+  scrollToRealTime();
 }
 
 async function refreshLivePrice() {
@@ -403,7 +403,8 @@ async function refreshLivePrice() {
     candleSeries.update(updated);
     setDebugValue('debugLastCandleTime', updated.time);
     setDebugValue('debugLastCandleClose', updated.close);
-    scrollChartsToRealtime();
+    setDebugValue('debugClientTs', new Date().toLocaleTimeString());
+    scrollToRealTime();
     console.debug('[chart] live price update', updated);
   } catch (err) {
     console.error('[chart] live price error', err);
@@ -436,6 +437,7 @@ async function refreshChartRealtime() {
     console.debug('[chart] refreshChartRealtime fired');
     const data = await apiGet(`/api/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
     setDebugValue('debugLastFetch', new Date().toLocaleTimeString());
+    setDebugValue('debugClientTs', new Date().toLocaleTimeString());
     applyRealtimeChartUpdate(data);
     setDebugValue('debugPollingStatus', 'candles ok');
   } catch (err) {
@@ -522,6 +524,11 @@ function startLivePriceRefresh() {
   }, 1000);
 }
 
+function startAutoRefresh() {
+  startChartPolling();
+  startLivePriceRefresh();
+}
+
 function stopLivePriceRefresh() {
   if (pricePollingTimer) {
     clearInterval(pricePollingTimer);
@@ -591,23 +598,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     stopChartPolling();
     stopLivePriceRefresh();
     await refreshChart(true);
-    startChartPolling();
-    startLivePriceRefresh();
+    startAutoRefresh();
   });
   if ($('intervalSelect')) $('intervalSelect').addEventListener('change', async () => {
     currentInterval = $('intervalSelect').value || '1m';
     stopChartPolling();
     stopLivePriceRefresh();
     await refreshChart(true);
-    startChartPolling();
-    startLivePriceRefresh();
+    startAutoRefresh();
   });
 
   await refreshAll({ fit: true });
 
   setDebugValue('debugPollingStatus', 'started');
   setDebugValue('debugLastFetch', new Date().toLocaleTimeString());
-  startChartPolling();
+  setDebugValue('debugClientTs', new Date().toLocaleTimeString());
+  startAutoRefresh();
   startStateRefresh();
-  startLivePriceRefresh();
 });
