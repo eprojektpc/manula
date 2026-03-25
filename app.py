@@ -317,13 +317,19 @@ def api_candles():
                 'text': f"ENTRY S{pos['slot']} @ {float(pos['entry_price']):.6f}",
             })
     payload['markers'] = markers
-    return jsonify(payload)
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 @app.route('/api/price')
 def api_price():
     symbol = str(request.args.get('symbol') or default_symbol()).upper()
-    return jsonify({'symbol': symbol, 'price': float(get_price(symbol) or 0.0), 'ts': time.time()})
+    response = jsonify({'symbol': symbol, 'price': float(get_price(symbol) or 0.0), 'ts': time.time()})
+    response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 @app.route('/api/symbols')
