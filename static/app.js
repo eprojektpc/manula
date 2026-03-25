@@ -128,6 +128,17 @@ function intervalToSeconds(interval) {
   return 60;
 }
 
+function normalizeCandles(candles) {
+  if (!Array.isArray(candles)) return [];
+  return candles.map((candle) => ({
+    time: Number(candle.time),
+    open: Number(candle.open),
+    high: Number(candle.high),
+    low: Number(candle.low),
+    close: Number(candle.close),
+  }));
+}
+
 function fillConfig(cfg) {
   $('cfg_quote_asset').value = cfg.trading.quote_asset;
   $('cfg_scan_interval_sec').value = cfg.scanner.scan_interval_sec;
@@ -289,15 +300,19 @@ function renderScanHistory(rows) {
 }
 
 function renderChartPayload(data, { fit = false } = {}) {
-  lastChartPayload = data;
-  candleSeries.setData(data.candles || []);
+  const normalizedCandles = normalizeCandles(data.candles);
+  lastChartPayload = {
+    ...data,
+    candles: normalizedCandles,
+  };
+  candleSeries.setData(normalizedCandles);
   ema9Series.setData(data.ema9 || []);
   ema21Series.setData(data.ema21 || []);
   ema50Series.setData(data.ema50 || []);
-  candleSeries.setMarkers(data.markers || []);
-  rsiSeries.setData(data.rsi || []);
-  rsi30Series.setData((data.rsi || []).map((x) => ({ time: x.time, value: 30 })));
-  rsi70Series.setData((data.rsi || []).map((x) => ({ time: x.time, value: 70 })));
+  candleSeries.setMarkers(lastChartPayload.markers || []);
+  rsiSeries.setData(lastChartPayload.rsi || []);
+  rsi30Series.setData((lastChartPayload.rsi || []).map((x) => ({ time: x.time, value: 30 })));
+  rsi70Series.setData((lastChartPayload.rsi || []).map((x) => ({ time: x.time, value: 70 })));
   if (data.debug) {
     setDebugValue('debugServerTs', data.debug.server_ts);
     setDebugValue('debugLastCandleTime', data.debug.last_candle_time);
@@ -331,7 +346,7 @@ function applyRealtimeChartUpdate(nextData) {
   }
 
   const prevCandles = lastChartPayload.candles;
-  const nextCandles = nextData.candles;
+  const nextCandles = normalizeCandles(nextData.candles);
   const prevLastTs = Number(prevCandles[prevCandles.length - 1].time);
   const last = nextCandles[nextCandles.length - 1];
   const normalizedLast = {
@@ -418,21 +433,8 @@ async function refreshLivePrice() {
 
     candleSeries.update(normalizedUpdated);
     console.log('CANDLE UPDATE PRICE', normalizedUpdated);
-
-    candleChart.timeScale().scrollToRealTime();
-    rsiChart.timeScale().scrollToRealTime();
-
-    const lastPayloadTs = Number(lastChartPayload.candles[lastChartPayload.candles.length - 1].time);
-    if (currentBucket === lastPayloadTs) {
-      const fallbackUpdated = {
-        ...normalizedUpdated,
-        time: lastPayloadTs,
-      };
-      candleSeries.update(fallbackUpdated);
-      console.log('CANDLE UPDATE PRICE', fallbackUpdated);
-      candles[candles.length - 1] = fallbackUpdated;
-      updated = fallbackUpdated;
-    }
+    candles[candles.length - 1] = normalizedUpdated;
+    updated = normalizedUpdated;
 
     setDebugValue('debugLastCandleTime', updated.time);
     setDebugValue('debugLastCandleClose', updated.close);
