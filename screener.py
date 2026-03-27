@@ -68,7 +68,11 @@ def fetch_tickers() -> list[dict[str, Any]]:
 
 def klines_to_df(symbol: str, interval: str = '1m', limit: int = 180, include_live: bool = False) -> pd.DataFrame:
     raw = _get_json('/api/v3/klines', params={'symbol': symbol, 'interval': interval, 'limit': limit}, timeout=10)
+    if not raw:
+        print(f'[SCREENER_ERROR] no_klines symbol={symbol} interval={interval}')
+        raise ScreenerError(f'Brak danych świec dla {symbol}')
     if len(raw) < 60:
+        print(f'[SCREENER_ERROR] insufficient_klines symbol={symbol} interval={interval} count={len(raw)}')
         raise ScreenerError(f'Za mało świec dla {symbol}')
     rows = raw if include_live else (raw[:-1] if len(raw) > 2 else raw)
     df = pd.DataFrame(rows, columns=[
@@ -90,7 +94,10 @@ def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, math.nan)
     rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)
+    rsi = rsi.where(~((avg_loss == 0) & (avg_gain > 0)), 100.0)
+    rsi = rsi.where(~((avg_gain == 0) & (avg_loss > 0)), 0.0)
+    rsi = rsi.where(~((avg_gain == 0) & (avg_loss == 0)), 50.0)
+    return rsi.fillna(50.0)
 
 
 def compute_macd_hist(close: pd.Series) -> pd.Series:
@@ -148,37 +155,58 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any]) -> Candidate | None:
 
     trend = 'UP' if ema9.iloc[-1] > ema21.iloc[-1] > ema50.iloc[-1] and last_close > ema9.iloc[-1] else 'MIX'
 
-    if trend != 'UP':
+    # Temporary relaxed thresholds for oversold/bounce discovery.
+    effective_rsi_max = 40.0
+    effective_min_vol_ratio = min(float(cfg.get('min_vol_ratio', 0.0)), 0.30)
+    effective_max_gap = max(float(cfg.get('max_distance_to_breakout_pct', 1.2)), 8.0)
+    effective_atr_min = max(0.02, min(float(cfg.get('atr_pct_min', 0.15)), 0.05))
+    effective_atr_max = max(float(cfg.get('atr_pct_max', 2.8)), 6.0)
+    effective_max_change_1m = max(float(cfg.get('max_change_1m_pct', 0.45)), 2.5)
+    effective_max_change_3m = max(float(cfg.get('max_change_3m_pct', 0.90)), 5.0)
+
+    def reject(reason: str) -> None:
+        print(
+            f'[SCREENER_DEBUG] {symbol} '
+            f'rsi={last_rsi:.2f} volume={vol_ratio:.3f} '
+            f'price_change_3m={change_3m_pct:.3f}% rejected_reason={reason}'
+        )
+
+    if last_rsi > effective_rsi_max:
+        reject(f'rsi_above_{effective_rsi_max:.0f}')
         return None
-    if not (float(cfg['rsi_min']) <= last_rsi <= float(cfg['rsi_max'])):
+    if gap_pct < 0.0 or gap_pct > effective_max_gap:
+        reject(f'gap_outside_0_{effective_max_gap:.2f}')
         return None
-    if not (float(cfg['min_distance_to_breakout_pct']) <= gap_pct <= float(cfg['max_distance_to_breakout_pct'])):
+    if vol_ratio < effective_min_vol_ratio:
+        reject(f'volume_ratio_below_{effective_min_vol_ratio:.2f}')
         return None
-    if vol_ratio < float(cfg['min_vol_ratio']):
+    if last_atr_pct < effective_atr_min or last_atr_pct > effective_atr_max:
+        reject(f'atr_outside_{effective_atr_min:.2f}_{effective_atr_max:.2f}')
         return None
-    if last_atr_pct < float(cfg['atr_pct_min']) or last_atr_pct > float(cfg['atr_pct_max']):
-        return None
-    if range_position < float(cfg['min_range_position']) or range_position > float(cfg['max_range_position']):
-        return None
-    if change_1m_pct > float(cfg['max_change_1m_pct']) or change_3m_pct > float(cfg['max_change_3m_pct']):
-        return None
-    if ema_spread_pct < float(cfg['ema_spread_min_pct']):
-        return None
-    if last_macd_hist < float(cfg['min_macd_hist']):
+    if change_1m_pct > effective_max_change_1m or change_3m_pct > effective_max_change_3m:
+        reject(f'change_too_high_1m>{effective_max_change_1m:.2f}_3m>{effective_max_change_3m:.2f}')
         return None
 
-    breakout_score = max(0.0, (float(cfg['max_distance_to_breakout_pct']) - gap_pct)) * 1.8
-    volume_score = min(3.0, max(0.0, (vol_ratio - 1.0) * 2.2))
-    rsi_score = max(0.0, 1.8 - abs(last_rsi - 54.0) / 6.0)
-    range_score = max(0.0, 1.5 - abs(range_position - 0.78) * 4.0)
-    chase_penalty = max(0.0, change_3m_pct - 0.35) * 3.0
-    macd_score = min(1.2, max(0.0, last_macd_hist * 40.0))
-    atr_score = max(0.0, 1.2 - abs(last_atr_pct - 0.9))
-    score = breakout_score + volume_score + rsi_score + range_score + macd_score + atr_score - chase_penalty
+    breakout_score = max(0.0, (effective_max_gap - gap_pct)) * 0.6
+    volume_score = min(2.5, max(0.0, (vol_ratio - 0.3) * 1.8))
+    rsi_score = max(0.0, (40.0 - last_rsi) / 4.0)
+    range_score = max(0.0, 2.0 - abs(range_position - 0.25) * 3.0)
+    rebound_bonus = max(0.0, -change_3m_pct) * 0.9
+    chase_penalty = max(0.0, change_3m_pct - 0.8) * 1.5
+    macd_score = min(0.8, max(0.0, (last_macd_hist + 0.05) * 10.0))
+    atr_score = max(0.0, 1.0 - abs(last_atr_pct - 0.7))
+    trend_score = 0.4 if trend == 'UP' else 0.0
+    ema_score = max(-0.5, min(0.6, ema_spread_pct * 8.0))
+    score = breakout_score + volume_score + rsi_score + range_score + rebound_bonus + macd_score + atr_score + trend_score + ema_score - chase_penalty
 
     note = (
-        f'pre-breakout | RSI {last_rsi:.1f} | vol x{vol_ratio:.2f} | '
+        f'oversold-rebound | RSI {last_rsi:.1f} | vol x{vol_ratio:.2f} | '
         f'gap {gap_pct:.2f}% | 3m {change_3m_pct:.2f}%'
+    )
+    print(
+        f'[SCREENER_DEBUG] {symbol} '
+        f'rsi={last_rsi:.2f} volume={vol_ratio:.3f} '
+        f'price_change_3m={change_3m_pct:.3f}% rejected_reason=accepted'
     )
     return Candidate(
         symbol=symbol,
@@ -201,6 +229,10 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     blacklist = {str(x).upper().strip() for x in scanner.get('blacklist', [])}
     tickers = fetch_tickers()
     allowed_symbols = set(fetch_symbols(quote_asset))
+    if not allowed_symbols:
+        print(f'[SCREENER_ERROR] allowed_symbols empty for quote_asset={quote_asset}')
+    if not tickers:
+        print('[SCREENER_ERROR] tickers response is empty')
 
     universe: list[tuple[str, float]] = []
     for row in tickers:
@@ -216,6 +248,7 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
 
     universe.sort(key=lambda x: x[1], reverse=True)
     top_symbols = [sym for sym, _ in universe[: int(scanner['top_volume_limit'])]]
+    print(f'[SCREENER_MULTI_OUTPUT] symbols={top_symbols}')
     if not top_symbols:
         raise ScreenerError('Brak par spełniających minimalną płynność.')
 
@@ -228,11 +261,18 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
                 item = fut.result()
                 if item is not None:
                     candidates.append(item)
-            except Exception:
+            except Exception as exc:
+                print(f'[SCREENER_ERROR] analyze_symbol_failed symbol={futures[fut]} error={exc}')
                 continue
 
     candidates.sort(key=lambda x: x.score, reverse=True)
-    return [c.as_dict() for c in candidates[: int(scanner['top_pairs'])]]
+    raw_count = len(candidates)
+    target_pairs = min(10, max(3, int(scanner.get('top_pairs', 5))))
+    selected = [c.as_dict() for c in candidates[:target_pairs]]
+    selected_symbols = [c['symbol'] for c in selected]
+    print(f'[SCREENER_MULTI_OUTPUT] raw_count={raw_count} filtered_count={len(selected)} candidates={selected_symbols}')
+    print(f'[SCREENER_OK] found_symbols={selected_symbols}')
+    return selected
 
 
 def build_chart_payload(symbol: str, interval: str = '1m', limit: int = 220) -> dict[str, Any]:
