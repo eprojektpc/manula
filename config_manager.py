@@ -15,14 +15,33 @@ DEFAULT_CONFIG: dict[str, Any] = {
         'debug': False,
         'secret_key': 'manual-panel-secret-change-me',
     },
+    'auth': {
+        'username': 'admin',
+        'password': 'haslo123',
+    },
+    'ui': {
+        'refresh_interval_sec': 1,
+    },
     'trading': {
         'quote_asset': 'USDC',
         'default_budget': 25.0,
         'slot_count': 3,
         'tp_pct': 0.70,
         'sl_pct': 0.60,
-        'monitor_interval_sec': 3,
+        'monitor_interval_sec': 1,
         'allow_manual_sell_without_slot': False,
+    },
+    'fuel': {
+        'enabled': True,
+        'rsi_weight': 1.0,
+        'macd_weight': 1.0,
+        'momentum_weight': 1.0,
+    },
+    'knife_filter': {
+        'knife_filter_enabled': True,
+        'knife_max_drop_pct': -3.0,
+        'knife_rsi_threshold': 28.0,
+        'knife_lookback': 6,
     },
     'scanner': {
         'enabled': True,
@@ -81,6 +100,9 @@ def save_config(data: dict[str, Any]) -> dict[str, Any]:
 
 
 FIELDS = {
+    'auth.username': str,
+    'auth.password': str,
+    'ui.refresh_interval_sec': int,
     'trading.default_budget': float,
     'trading.slot_count': int,
     'trading.tp_pct': float,
@@ -109,6 +131,14 @@ FIELDS = {
     'scanner.workers': int,
     'scanner.blacklist': list,
     'trading.quote_asset': str,
+    'knife_filter.knife_filter_enabled': bool,
+    'knife_filter.knife_max_drop_pct': float,
+    'knife_filter.knife_rsi_threshold': float,
+    'knife_filter.knife_lookback': int,
+    'fuel.enabled': bool,
+    'fuel.rsi_weight': float,
+    'fuel.macd_weight': float,
+    'fuel.momentum_weight': float,
 }
 
 

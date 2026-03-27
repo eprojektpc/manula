@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="login-wrap">
+    <form method="post" class="panel login-card">
+      <h2>Logowanie</h2>
+      {% if error %}<div class="red">{{ error }}</div>{% endif %}
+      <label>Login<input type="text" name="username" required></label>
+      <label>Hasło<input type="password" name="password" required></label>
+      <button class="primary" type="submit">Zaloguj</button>
+    </form>
+  </div>
+</body>
+</html>
