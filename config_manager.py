@@ -36,7 +36,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         'max_distance_to_breakout_pct': 1.20,
         'min_vol_ratio': 1.15,
         'rsi_min': 48.0,
-        'rsi_max': 63.0,
+        'rsi_max': 25.0,
         'ema_spread_min_pct': 0.03,
         'atr_pct_min': 0.15,
         'atr_pct_max': 2.80,
