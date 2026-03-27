@@ -15,6 +15,16 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f'PRAGMA table_info({table})').fetchall()
+    return {str(r['name']) for r in rows}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    if column not in _table_columns(conn, table):
+        conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+
+
 def init_db() -> None:
     conn = connect()
     cur = conn.cursor()
@@ -28,10 +38,15 @@ def init_db() -> None:
             budget REAL NOT NULL,
             tp_pct REAL NOT NULL,
             sl_pct REAL NOT NULL,
+            tp_price REAL,
+            sl_price REAL,
             current_price REAL,
             pnl_pct REAL DEFAULT 0,
             pnl_value REAL DEFAULT 0,
             order_id TEXT,
+            close_reason TEXT,
+            fuel_score REAL,
+            pattern_info TEXT,
             opened_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'OPEN'
@@ -84,6 +99,14 @@ def init_db() -> None:
         );
         '''
     )
+
+    # Safe migrations for older DB files.
+    _ensure_column(conn, 'positions', 'tp_price', 'REAL')
+    _ensure_column(conn, 'positions', 'sl_price', 'REAL')
+    _ensure_column(conn, 'positions', 'close_reason', 'TEXT')
+    _ensure_column(conn, 'positions', 'fuel_score', 'REAL')
+    _ensure_column(conn, 'positions', 'pattern_info', 'TEXT')
+
     conn.commit()
     conn.close()
 
@@ -137,12 +160,12 @@ def get_open_positions() -> list[dict[str, Any]]:
     return rows_to_dicts(rows)
 
 
-def upsert_open_position(*, slot: int, symbol: str, entry_price: float, quantity: float, budget: float, tp_pct: float, sl_pct: float, order_id: str | None, opened_at: str) -> None:
+def upsert_open_position(*, slot: int, symbol: str, entry_price: float, quantity: float, budget: float, tp_pct: float, sl_pct: float, tp_price: float, sl_price: float, order_id: str | None, opened_at: str, fuel_score: float | None = None, pattern_info: str | None = None) -> None:
     conn = connect()
     conn.execute(
         '''
-        INSERT INTO positions(slot, symbol, entry_price, quantity, budget, tp_pct, sl_pct, current_price, pnl_pct, pnl_value, order_id, opened_at, updated_at, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'OPEN')
+        INSERT INTO positions(slot, symbol, entry_price, quantity, budget, tp_pct, sl_pct, tp_price, sl_price, current_price, pnl_pct, pnl_value, order_id, close_reason, fuel_score, pattern_info, opened_at, updated_at, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, ?, ?, ?, ?, 'OPEN')
         ON CONFLICT(slot) DO UPDATE SET
             symbol=excluded.symbol,
             entry_price=excluded.entry_price,
@@ -150,15 +173,20 @@ def upsert_open_position(*, slot: int, symbol: str, entry_price: float, quantity
             budget=excluded.budget,
             tp_pct=excluded.tp_pct,
             sl_pct=excluded.sl_pct,
+            tp_price=excluded.tp_price,
+            sl_price=excluded.sl_price,
             current_price=excluded.current_price,
             pnl_pct=0,
             pnl_value=0,
             order_id=excluded.order_id,
+            close_reason=NULL,
+            fuel_score=excluded.fuel_score,
+            pattern_info=excluded.pattern_info,
             opened_at=excluded.opened_at,
             updated_at=excluded.updated_at,
             status='OPEN'
         ''',
-        (slot, symbol, entry_price, quantity, budget, tp_pct, sl_pct, entry_price, order_id, opened_at, opened_at),
+        (slot, symbol, entry_price, quantity, budget, tp_pct, sl_pct, tp_price, sl_price, entry_price, order_id, fuel_score, pattern_info, opened_at, opened_at),
     )
     conn.commit()
     conn.close()
@@ -174,9 +202,9 @@ def update_position_metrics(slot: int, current_price: float, pnl_pct: float, pnl
     conn.close()
 
 
-def close_position(slot: int, updated_at: str) -> None:
+def close_position(slot: int, updated_at: str, reason: str | None = None) -> None:
     conn = connect()
-    conn.execute('UPDATE positions SET status="CLOSED", updated_at=? WHERE slot=? AND status="OPEN"', (updated_at, slot))
+    conn.execute('UPDATE positions SET status="CLOSED", close_reason=?, updated_at=? WHERE slot=? AND status="OPEN"', (reason, updated_at, slot))
     conn.commit()
     conn.close()
 
