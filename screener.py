@@ -229,12 +229,19 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     blacklist = {str(x).upper().strip() for x in scanner.get('blacklist', [])}
     tickers = fetch_tickers()
     allowed_symbols = set(fetch_symbols(quote_asset))
+    effective_min_quote_volume = min(float(scanner.get('min_quote_volume', 0.0)), 100000.0)
+
+    print(f'[SCREENER_DEBUG] allowed_symbols_count={len(allowed_symbols)} quote_asset={quote_asset}')
+    print(f'[SCREENER_DEBUG] tickers_count={len(tickers)}')
+    print(f'[SCREENER_DEBUG] min_quote_volume={effective_min_quote_volume}')
+
     if not allowed_symbols:
         print(f'[SCREENER_ERROR] allowed_symbols empty for quote_asset={quote_asset}')
     if not tickers:
         print('[SCREENER_ERROR] tickers response is empty')
 
-    universe: list[tuple[str, float]] = []
+    prefilter_rows: list[tuple[str, float]] = []
+    removed_by_volume = 0
     for row in tickers:
         symbol = str(row.get('symbol', ''))
         if symbol not in allowed_symbols:
@@ -242,15 +249,47 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
         if symbol in blacklist:
             continue
         quote_volume = float(row.get('quoteVolume') or 0.0)
-        if quote_volume < float(scanner['min_quote_volume']):
-            continue
-        universe.append((symbol, quote_volume))
+        prefilter_rows.append((symbol, quote_volume))
+        if quote_volume < effective_min_quote_volume:
+            removed_by_volume += 1
 
+    prefilter_rows.sort(key=lambda x: x[1], reverse=True)
+    prefilter_preview = [f'{sym}:{vol:.2f}' for sym, vol in prefilter_rows[:10]]
+    print(f'[SCREENER_DEBUG] prefilter_top10={prefilter_preview}')
+
+    universe: list[tuple[str, float]] = [
+        (symbol, quote_volume)
+        for symbol, quote_volume in prefilter_rows
+        if quote_volume >= effective_min_quote_volume
+    ]
+
+    print(f'[SCREENER_DEBUG] removed_by_volume={removed_by_volume}')
+    print(f'[SCREENER_DEBUG] universe_count={len(universe)}')
+
+    if not universe and prefilter_rows:
+        fallback_size = min(20, len(prefilter_rows))
+        universe = prefilter_rows[:fallback_size]
+        print(f'[SCREENER_WARN] universe empty after volume filter, fallback_top_by_volume={fallback_size}')
+
+    top_limit = max(20, int(scanner.get('top_volume_limit', 50)))
     universe.sort(key=lambda x: x[1], reverse=True)
-    top_symbols = [sym for sym, _ in universe[: int(scanner['top_volume_limit'])]]
+    top_symbols = [sym for sym, _ in universe[:top_limit]]
+
+    if not top_symbols and prefilter_rows:
+        fallback_size = min(20, len(prefilter_rows))
+        top_symbols = [sym for sym, _ in prefilter_rows[:fallback_size]]
+        print(f'[SCREENER_WARN] top_symbols empty, using prefilter fallback size={fallback_size}')
+
+    print(f'[SCREENER_DEBUG] top_symbols_count={len(top_symbols)} top_symbols_preview={top_symbols[:10]}')
     print(f'[SCREENER_MULTI_OUTPUT] symbols={top_symbols}')
     if not top_symbols:
         raise ScreenerError('Brak par spełniających minimalną płynność.')
+
+    ticker_price_map = {
+        str(row.get('symbol', '')): float(row.get('lastPrice') or 0.0)
+        for row in tickers
+        if row.get('symbol')
+    }
 
     candidates: list[Candidate] = []
     workers = max(1, int(scanner.get('workers', 8)))
@@ -269,6 +308,28 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     raw_count = len(candidates)
     target_pairs = min(10, max(3, int(scanner.get('top_pairs', 5))))
     selected = [c.as_dict() for c in candidates[:target_pairs]]
+
+    if len(selected) < target_pairs:
+        selected_symbols_set = {c['symbol'] for c in selected}
+        missing = target_pairs - len(selected)
+        fallback_symbols = [sym for sym in top_symbols if sym not in selected_symbols_set][:missing]
+        for sym in fallback_symbols:
+            selected.append({
+                'symbol': sym,
+                'score': 0.0,
+                'price': round(ticker_price_map.get(sym, 0.0), 8),
+                'breakout_gap_pct': 0.0,
+                'rsi': 50.0,
+                'vol_ratio': 0.0,
+                'change_3m_pct': 0.0,
+                'atr_pct': 0.0,
+                'range_position': 0.0,
+                'trend': 'MIX',
+                'note': 'fallback_liquidity_candidate',
+            })
+        if fallback_symbols:
+            print(f'[SCREENER_WARN] candidates below target, added_fallback_symbols={fallback_symbols}')
+
     selected_symbols = [c['symbol'] for c in selected]
     print(f'[SCREENER_MULTI_OUTPUT] raw_count={raw_count} filtered_count={len(selected)} candidates={selected_symbols}')
     print(f'[SCREENER_OK] found_symbols={selected_symbols}')
