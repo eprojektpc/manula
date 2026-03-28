@@ -10,6 +10,7 @@ Gotowy panel manualny do wrzucenia **do root repo** jako folder `manual/`.
 - manualne BUY / SELL po slotach
 - licznik zysku/straty live dla otwartych pozycji
 - auto TP / SL
+- tryb auto bez auto-zakupów (bot zamyka tylko pozycje na TP/SL)
 - cykliczny screener działający w tle
 - edycja ustawień skanera bezpośrednio w panelu
 - historia trade + historia skanera w SQLite
