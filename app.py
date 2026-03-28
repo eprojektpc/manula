@@ -454,6 +454,26 @@ def api_slot_config(slot: int):
     return jsonify({'ok': True, 'slot': slot})
 
 
+
+@app.route('/chart-data')
+@login_required
+def chart_data():
+    cfg = load_config()
+    slot_count = int(cfg['trading']['slot_count'])
+    slot = int(request.args.get('slot', 0))
+    if slot < 1 or slot > slot_count:
+        raise ValueError(f'Nieprawidłowy slot. Użyj 1..{slot_count}.')
+
+    interval = (request.args.get('interval') or '1m').strip()
+    slot_map = {int(item['slot']): item for item in _slots_payload()}
+    slot_item = slot_map.get(slot)
+    symbol = str((slot_item or {}).get('symbol') or default_symbol()).upper().strip()
+    payload = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
+    payload['slot'] = slot
+    payload['symbol'] = symbol
+    return jsonify(payload)
+
+
 @app.route('/api/candles')
 @login_required
 def api_candles():

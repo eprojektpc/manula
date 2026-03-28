@@ -1,6 +1,10 @@
 let state = null;
 let symbolsCache = [];
 let candleChart, rsiChart, candleSeries, ema9Series, ema21Series, ema50Series, rsiSeries, rsi30Series, rsi70Series;
+const charts = {};
+const series = {};
+const slotChartPayloads = {};
+const slotChartInFlight = {};
 let currentSymbol = null;
 let currentInterval = '1m';
 let lastChartPayload = null;
@@ -86,6 +90,10 @@ function initCharts() {
   window.addEventListener('resize', () => {
     candleChart.applyOptions({ width: $('candleChart').clientWidth });
     rsiChart.applyOptions({ width: $('rsiChart').clientWidth });
+    Object.entries(charts).forEach(([slot, chart]) => {
+      const container = document.querySelector(`[data-slot-chart="${slot}"]`);
+      if (container) chart.applyOptions({ width: container.clientWidth });
+    });
   });
 }
 
@@ -128,6 +136,11 @@ function slotCardHtml(slot) {
       <button data-action="chart">Pokaż na wykresie</button>
     </div>
 
+    <div class="slot-chart-wrap">
+      <div class="slot-chart-header">Wykres slotu ${slot.slot} · <span data-slot-symbol>${slot.symbol || '-'}</span></div>
+      <div class="slot-chart" data-slot-chart="${slot.slot}"></div>
+    </div>
+
     <div class="kv">
       <div>Status</div><div>${slot.status}</div>
       <div>Pozycja</div><div>${isOpen ? `${slot.symbol} @ ${fmt(slot.entry_price, 6)}` : 'Brak'}</div>
@@ -154,6 +167,12 @@ async function saveSlotConfig(slotId, card) {
 
 function wireSlotCard(card, slot) {
   const slotId = slot.slot;
+  const symbolSelect = card.querySelector('[data-field="symbol"]');
+  symbolSelect.addEventListener('change', () => {
+    const symbolLabel = card.querySelector('[data-slot-symbol]');
+    if (symbolLabel) symbolLabel.textContent = symbolSelect.value || '-';
+  });
+
   card.querySelector('[data-action="save"]').addEventListener('click', async () => {
     try {
       await saveSlotConfig(slotId, card);
@@ -206,8 +225,68 @@ function wireSlotCard(card, slot) {
   });
 }
 
+function destroySlotCharts() {
+  Object.keys(charts).forEach((slot) => {
+    try {
+      charts[slot].remove();
+    } catch (e) {
+      // noop
+    }
+    delete charts[slot];
+    delete series[slot];
+    delete slotChartPayloads[slot];
+    delete slotChartInFlight[slot];
+  });
+}
+
+function initSlotChart(slot) {
+  const container = document.querySelector(`[data-slot-chart="${slot}"]`);
+  if (!container) return;
+  const chart = LightweightCharts.createChart(container, {
+    layout: { background: { color: '#0b0f14' }, textColor: '#9fb0c3' },
+    grid: { vertLines: { color: '#1f2a36' }, horzLines: { color: '#1f2a36' } },
+    width: container.clientWidth,
+    height: 160,
+    rightPriceScale: { borderColor: '#1f2a36' },
+    timeScale: { borderColor: '#1f2a36', timeVisible: true, secondsVisible: false },
+  });
+
+  charts[slot] = chart;
+  series[slot] = chart.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
+}
+
+function updateSlotChart(slot, data, fit = false) {
+  if (!series[slot]) return;
+  const candles = data.candles || [];
+  const prevCandles = slotChartPayloads[slot]?.candles || [];
+
+  if (!prevCandles.length || candles.length < 3 || fit) {
+    series[slot].setData(candles);
+    if (fit && charts[slot]) charts[slot].timeScale().fitContent();
+  } else {
+    const nextLast = candles[candles.length - 1];
+    if (nextLast) series[slot].update(nextLast);
+  }
+
+  slotChartPayloads[slot] = data;
+}
+
+async function refreshSlotChart(slot, fit = false) {
+  if (!series[slot] || slotChartInFlight[slot]) return;
+  slotChartInFlight[slot] = true;
+  try {
+    const data = await apiGet(`/chart-data?slot=${encodeURIComponent(slot)}&interval=${encodeURIComponent(currentInterval)}`);
+    updateSlotChart(slot, data, fit);
+  } catch (e) {
+    // do not disrupt UI flash for background slot polling
+  } finally {
+    slotChartInFlight[slot] = false;
+  }
+}
+
 function renderSlots(slots) {
   const wrap = $('positionsCards');
+  destroySlotCharts();
   wrap.innerHTML = '';
   slots.forEach((slot) => {
     const card = document.createElement('div');
@@ -215,6 +294,8 @@ function renderSlots(slots) {
     card.innerHTML = slotCardHtml(slot);
     wrap.appendChild(card);
     wireSlotCard(card, slot);
+    initSlotChart(slot.slot);
+    refreshSlotChart(slot.slot, true);
   });
 }
 
@@ -273,15 +354,11 @@ function applyIncremental(nextData) {
     return;
   }
 
-  if (prevLast.time === nextLast.time) {
-    candleSeries.update(nextLast);
-  } else {
-    candleSeries.update(nextLast);
-  }
+  candleSeries.update(nextLast);
 
-  const updateLast = (series, values) => {
+  const updateLast = (ser, values) => {
     if (Array.isArray(values) && values.length) {
-      series.update(values[values.length - 1]);
+      ser.update(values[values.length - 1]);
     }
   };
   updateLast(ema9Series, nextData.ema9);
@@ -333,6 +410,8 @@ async function refreshChartTick() {
   } finally {
     chartPollingInFlight = false;
   }
+
+  await Promise.all(Object.keys(charts).map((slot) => refreshSlotChart(slot)));
 }
 
 function startChartPolling() {
@@ -383,6 +462,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('intervalSelect').addEventListener('change', async () => {
     currentInterval = $('intervalSelect').value || '1m';
     await refreshChart(true);
+    await Promise.all(Object.keys(charts).map((slot) => refreshSlotChart(slot, true)));
   });
 
   await loadState();
