@@ -364,6 +364,16 @@ function wireSlotCard(card, slot) {
     setText(card, 'slotInterval', card.querySelector('[data-field="interval"]').value || '1m');
     await refreshSlotChart(slotId, true, true);
   });
+
+  card.querySelector('[data-field="auto_enabled"]').addEventListener('change', async () => {
+    try {
+      await saveSlotConfig(slotId, card);
+      showSlotFlash(slotId, `Auto mode dla slotu ${slotId} zapisany (TP/SL bez zmian).`);
+      await loadState();
+    } catch (e) {
+      showSlotFlash(slotId, e.message, true);
+    }
+  });
 }
 
 function ensureSlotCard(slotData) {
