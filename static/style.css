@@ -32,6 +32,7 @@ button.danger { background: #8a1f1f; }
 .checkbox-inline { flex-direction: row; align-items: center; gap: 8px; align-self: end; }
 .slot-actions { margin-top: 6px; margin-bottom: 8px; }
 .trade-actions button { font-weight: 700; min-height: 46px; }
+.chart-trade-actions { margin-top: 0; margin-bottom: 8px; }
 .slot-indicators { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; }
 .green { color: var(--profit); }
