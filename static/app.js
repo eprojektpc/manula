@@ -2,6 +2,7 @@ let state = null;
 let symbolsCache = [];
 const slotCards = {};
 const slotChartState = {};
+let slotChartsResizeObserver = null;
 let stateRefreshTimer = null;
 let chartPollingTimer = null;
 
@@ -142,12 +143,16 @@ function initSlotChart(slotId) {
     ...common,
     width: candleEl.clientWidth,
     height: candleEl.clientHeight,
+    handleScroll: { pressedMouseMove: true, vertTouchDrag: true, horzTouchDrag: true, mouseWheel: true },
+    handleScale: { axisPressedMouseMove: true, pinch: true, mouseWheel: true },
   });
 
   const rsiChart = LightweightCharts.createChart(rsiEl, {
     ...common,
     width: rsiEl.clientWidth,
     height: rsiEl.clientHeight,
+    handleScroll: { pressedMouseMove: true, vertTouchDrag: true, horzTouchDrag: true, mouseWheel: true },
+    handleScale: { axisPressedMouseMove: true, pinch: true, mouseWheel: true },
   });
 
   const candles = candleChart.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
@@ -374,6 +379,7 @@ function ensureSlotCard(slotData) {
   slotCards[slotData.slot] = card;
   wireSlotCard(card, slotData);
   initSlotChart(slotData.slot);
+  observeSlotChartResize(slotData.slot);
   return card;
 }
 
@@ -476,9 +482,28 @@ function startStateRefresh() {
 
 function resizeAllCharts() {
   Object.values(slotChartState).forEach((chartState) => {
+    if (!chartState.candleEl.isConnected || !chartState.rsiEl.isConnected) return;
+    const candleWidth = chartState.candleEl.clientWidth;
+    const candleHeight = chartState.candleEl.clientHeight;
+    const rsiWidth = chartState.rsiEl.clientWidth;
+    const rsiHeight = chartState.rsiEl.clientHeight;
+    if (!candleWidth || !candleHeight || !rsiWidth || !rsiHeight) return;
+
     chartState.candleChart.applyOptions({ width: chartState.candleEl.clientWidth, height: chartState.candleEl.clientHeight });
     chartState.rsiChart.applyOptions({ width: chartState.rsiEl.clientWidth, height: chartState.rsiEl.clientHeight });
   });
+}
+
+function observeSlotChartResize(slotId) {
+  const chartState = slotChartState[slotId];
+  if (!chartState) return;
+  if (!slotChartsResizeObserver) {
+    slotChartsResizeObserver = new ResizeObserver(() => {
+      resizeAllCharts();
+    });
+  }
+  slotChartsResizeObserver.observe(chartState.candleEl);
+  slotChartsResizeObserver.observe(chartState.rsiEl);
 }
 
 async function loadState() {
@@ -499,9 +524,17 @@ async function loadState() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('resize', resizeAllCharts);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      resizeAllCharts();
+      refreshAllSlotCharts();
+    }
+  });
 
   await loadState();
   await refreshAllSlotCharts();
+  requestAnimationFrame(() => resizeAllCharts());
+  setTimeout(() => resizeAllCharts(), 250);
   startChartPolling();
   startStateRefresh();
   showFlash('Panel gotowy. Skanowanie dostępne per slot.');
