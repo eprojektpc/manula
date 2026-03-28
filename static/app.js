@@ -78,11 +78,6 @@ function slotCardHtml(slot) {
       <label class="checkbox-inline"><input data-field="auto_enabled" type="checkbox"> Auto mode</label>
     </div>
 
-    <div class="button-row slot-actions trade-actions">
-      <button class="primary" data-action="buy">BUY</button>
-      <button class="danger" data-action="sell">SELL</button>
-    </div>
-
     <div class="button-row slot-actions utility-actions">
       <button data-action="save">Zapisz slot</button>
       <button data-action="scan">Skanuj slot ${slot.slot}</button>
@@ -100,6 +95,10 @@ function slotCardHtml(slot) {
     </div>
 
     <div class="slot-chart-wrap">
+      <div class="button-row slot-actions trade-actions chart-trade-actions">
+        <button class="primary" data-action="buy">BUY</button>
+        <button class="danger" data-action="sell">SELL</button>
+      </div>
       <div class="slot-chart-header">Wykres slotu ${slot.slot} · <span data-role="slotSymbol">${slot.symbol || '-'}</span> · <span data-role="slotInterval">1m</span></div>
       <div class="slot-chart-main" data-slot-candle="${slot.slot}"></div>
       <div class="slot-chart-rsi" data-slot-rsi="${slot.slot}"></div>
