@@ -183,22 +183,36 @@ def compute_fuel_score(close: pd.Series, rsi: pd.Series, macd_hist: pd.Series, f
 def _knife_filter_hit(df: pd.DataFrame, rsi_series: pd.Series, knife_cfg: dict[str, Any]) -> tuple[bool, str]:
     if not bool(knife_cfg.get('knife_filter_enabled', True)):
         return False, ''
-    lookback = max(3, int(knife_cfg.get('knife_lookback', 6)))
+    lookback = max(3, int(knife_cfg.get('knife_lookback_bars', knife_cfg.get('knife_lookback', 6))))
     if len(df) <= lookback:
         return False, ''
 
     close = df['close']
-    ema50 = close.ewm(span=50, adjust=False).mean()
+    ema25 = close.ewm(span=25, adjust=False).mean()
+    ema99 = close.ewm(span=99, adjust=False).mean()
+    momentum_3 = close.pct_change(3) * 100.0
+
     ref_close = float(close.iloc[-lookback])
     last_close = float(close.iloc[-1])
     drop_pct = ((last_close / ref_close) - 1.0) * 100 if ref_close else 0.0
+    bar_returns = close.pct_change().tail(lookback) * 100.0
+    worst_bar_drop = float(bar_returns.min()) if not bar_returns.empty else 0.0
     last_rsi = float(rsi_series.iloc[-1])
-    below_ema = last_close < float(ema50.iloc[-1])
+    last_momentum = float(momentum_3.iloc[-1]) if pd.notna(momentum_3.iloc[-1]) else 0.0
+    below_ema25 = last_close < float(ema25.iloc[-1])
+    below_ema99 = last_close < float(ema99.iloc[-1])
 
     too_deep = drop_pct <= float(knife_cfg.get('knife_max_drop_pct', -3.0))
     low_rsi = last_rsi <= float(knife_cfg.get('knife_rsi_threshold', 28.0))
-    if too_deep and low_rsi and below_ema:
-        return True, f'knife_filter drop={drop_pct:.2f}% rsi={last_rsi:.2f}'
+    weak_momentum = last_momentum <= float(knife_cfg.get('knife_momentum_threshold', -0.25))
+    spike_down = worst_bar_drop <= float(knife_cfg.get('knife_single_bar_drop_pct', -1.10))
+    ema_down = below_ema25 and below_ema99
+
+    if too_deep and low_rsi and ema_down and (weak_momentum or spike_down):
+        return True, (
+            f'knife_filter drop={drop_pct:.2f}% rsi={last_rsi:.2f} '
+            f'mom3={last_momentum:.2f}% worst={worst_bar_drop:.2f}%'
+        )
     return False, ''
 
 
@@ -236,9 +250,8 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any], knife_cfg: dict[str, Any]) 
     vol_ratio = float(volume.iloc[-1] / max(volume.iloc[-21:-1].mean(), 1e-12))
     change_1m_pct = float(close.pct_change(1).iloc[-1] * 100)
     change_3m_pct = float((last_close / close.iloc[-4] - 1) * 100)
-    ema_spread_pct = float(((ema9.iloc[-1] - ema21.iloc[-1]) / last_close) * 100) if last_close else 0.0
-
-    trend = 'UP' if ema9.iloc[-1] > ema21.iloc[-1] > ema50.iloc[-1] and last_close > ema9.iloc[-1] else 'MIX'
+    ema_spread_pct = float(((ema7.iloc[-1] - ema25.iloc[-1]) / last_close) * 100) if last_close else 0.0
+    trend = 'UP' if ema7.iloc[-1] > ema25.iloc[-1] > ema99.iloc[-1] and last_close > ema7.iloc[-1] else 'MIX'
 
     effective_rsi_max = 40.0
     effective_min_vol_ratio = min(float(cfg.get('min_vol_ratio', 0.0)), 0.30)
