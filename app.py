@@ -31,6 +31,19 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def parse_optional_float(value: Any, field_name: str) -> float | None:
+    if value in (None, ''):
+        return None
+    if isinstance(value, str):
+        value = value.strip().replace(',', '.')
+        if value == '':
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'Nieprawidłowa wartość pola "{field_name}": {value}') from exc
+
+
 def scanner_status() -> dict[str, Any]:
     return storage.get_state('screener_status', {
         'running': False,
@@ -458,9 +471,9 @@ def api_slot_config(slot: int):
     data = request.get_json(force=True, silent=True) or {}
     symbol = str(data.get('symbol') or '').upper().strip()
     auto_enabled = bool(data.get('auto_enabled')) if 'auto_enabled' in data else None
-    budget = float(data['budget']) if data.get('budget') not in (None, '') else None
-    tp_pct = float(data['tp_pct']) if data.get('tp_pct') not in (None, '') else None
-    sl_pct = float(data['sl_pct']) if data.get('sl_pct') not in (None, '') else None
+    budget = parse_optional_float(data.get('budget'), 'budget')
+    tp_pct = parse_optional_float(data.get('tp_pct'), 'tp_pct')
+    sl_pct = parse_optional_float(data.get('sl_pct'), 'sl_pct')
 
     storage.upsert_slot_setting(
         slot=slot,
@@ -667,9 +680,9 @@ def api_buy():
     result = execute_buy(
         symbol=symbol,
         slot=slot,
-        budget=float(data['budget']) if data.get('budget') not in (None, '') else None,
-        tp_pct=float(data['tp_pct']) if data.get('tp_pct') not in (None, '') else None,
-        sl_pct=float(data['sl_pct']) if data.get('sl_pct') not in (None, '') else None,
+        budget=parse_optional_float(data.get('budget'), 'budget'),
+        tp_pct=parse_optional_float(data.get('tp_pct'), 'tp_pct'),
+        sl_pct=parse_optional_float(data.get('sl_pct'), 'sl_pct'),
     )
     return jsonify(result)
 
