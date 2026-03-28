@@ -5,6 +5,7 @@ const slotChartState = {};
 let slotChartsResizeObserver = null;
 let stateRefreshTimer = null;
 let chartPollingTimer = null;
+let loadStateRequestSeq = 0;
 
 const INTERVALS = ['1m', '3m', '5m', '15m', '1h'];
 const $ = (id) => document.getElementById(id);
@@ -517,11 +518,18 @@ function observeSlotChartResize(slotId) {
 }
 
 async function loadState() {
-  state = await apiGet('/api/state');
-  if (!symbolsCache.length) {
+  const requestSeq = ++loadStateRequestSeq;
+  const nextState = await apiGet('/api/state');
+  let nextSymbols = symbolsCache;
+  if (!nextSymbols.length) {
     const symbolsResponse = await apiGet('/api/symbols/all');
-    symbolsCache = symbolsResponse.symbols || [];
+    nextSymbols = symbolsResponse.symbols || [];
   }
+
+  if (requestSeq !== loadStateRequestSeq) return;
+
+  state = nextState;
+  symbolsCache = nextSymbols;
 
   $('scanStatus').textContent = `${state.scanner_status.last_status || '-'}${state.scanner_status.running ? ' · running' : ''}`;
   $('lastScan').textContent = state.scanner_status.last_scan_at || '-';
