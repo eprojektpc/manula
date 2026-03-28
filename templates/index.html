@@ -23,21 +23,15 @@
     </header>
 
     <section class="toolbar panel">
-      <div class="controls-grid">
-        <label>Para<select id="pairSelect"></select></label>
+      <div class="controls-grid controls-grid-top">
+        <label>Para wykresu<select id="pairSelect"></select></label>
         <label>Interwał
           <select id="intervalSelect"><option>1m</option><option>3m</option><option>5m</option><option>15m</option><option>1h</option></select>
         </label>
-        <label>Slot<select id="slotSelect"></select></label>
-        <label>Budżet<input id="budgetInput" type="number" step="0.01" value="25"></label>
-        <label>TP %<input id="tpInput" type="number" step="0.01" value="0.7"></label>
-        <label>SL %<input id="slInput" type="number" step="0.01" value="0.6"></label>
       </div>
       <div class="button-row">
-        <button class="primary" id="buyBtn">BUY</button>
-        <button class="danger" id="sellBtn">SELL</button>
         <button id="scanBtn">Skanuj</button>
-        <button id="refreshBtn">Odśwież</button>
+        <button id="refreshBtn">Odśwież wykres</button>
       </div>
       <div id="flash" class="flash"></div>
     </section>

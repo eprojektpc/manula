@@ -1,4 +1,5 @@
 let state = null;
+let symbolsCache = [];
 let candleChart, rsiChart, candleSeries, ema9Series, ema21Series, ema50Series, rsiSeries, rsi30Series, rsi70Series;
 let currentSymbol = null;
 let currentInterval = '1m';
@@ -105,30 +106,115 @@ function renderCandidates(candidates) {
   });
 }
 
+function slotCardHtml(slot) {
+  const pnlClass = Number(slot.pnl_pct || 0) >= 0 ? 'green' : 'red';
+  const isOpen = slot.status === 'OPEN';
+  const symbolSelect = symbolsCache.map((s) => `<option value="${s}" ${s === slot.symbol ? 'selected' : ''}>${s}</option>`).join('');
+
+  return `
+    <h3>Slot ${slot.slot}</h3>
+    <div class="slot-form-grid">
+      <label>Symbol<select data-field="symbol">${symbolSelect}</select></label>
+      <label>Budżet<input data-field="budget" type="number" step="0.01" value="${slot.config_budget ?? state?.config?.trading?.default_budget ?? 25}"></label>
+      <label>TP %<input data-field="tp_pct" type="number" step="0.01" value="${slot.config_tp_pct ?? state?.config?.trading?.tp_pct ?? 0.7}"></label>
+      <label>SL %<input data-field="sl_pct" type="number" step="0.01" value="${slot.config_sl_pct ?? state?.config?.trading?.sl_pct ?? 0.6}"></label>
+      <label class="checkbox-inline"><input data-field="auto_enabled" type="checkbox" ${slot.auto_enabled ? 'checked' : ''}> Auto mode</label>
+    </div>
+
+    <div class="button-row slot-actions">
+      <button class="primary" data-action="buy">BUY</button>
+      <button class="danger" data-action="sell" ${isOpen ? '' : 'disabled'}>SELL</button>
+      <button data-action="save">Zapisz slot</button>
+      <button data-action="chart">Pokaż na wykresie</button>
+    </div>
+
+    <div class="kv">
+      <div>Status</div><div>${slot.status}</div>
+      <div>Pozycja</div><div>${isOpen ? `${slot.symbol} @ ${fmt(slot.entry_price, 6)}` : 'Brak'}</div>
+      <div>Current</div><div>${isOpen ? fmt(slot.current_price, 6) : '-'}</div>
+      <div>Qty</div><div>${isOpen ? fmt(slot.quantity, 6) : '-'}</div>
+      <div>TP / SL</div><div>${isOpen ? `${fmt(slot.tp_price,6)} / ${fmt(slot.sl_price,6)}` : '-'}</div>
+      <div>PNL live %</div><div class="${pnlClass}">${isOpen ? `${fmt(slot.pnl_pct, 2)}%` : '0.00%'}</div>
+      <div>PNL live</div><div class="${pnlClass}">${fmt(slot.pnl_value || 0, 4)}</div>
+      <div>PNL realized</div><div class="${Number(slot.realized_pnl || 0) >= 0 ? 'green' : 'red'}">${fmt(slot.realized_pnl || 0, 4)}</div>
+    </div>
+  `;
+}
+
+async function saveSlotConfig(slotId, card) {
+  const payload = {
+    symbol: card.querySelector('[data-field="symbol"]').value,
+    budget: card.querySelector('[data-field="budget"]').value,
+    tp_pct: card.querySelector('[data-field="tp_pct"]').value,
+    sl_pct: card.querySelector('[data-field="sl_pct"]').value,
+    auto_enabled: card.querySelector('[data-field="auto_enabled"]').checked,
+  };
+  await apiPost(`/api/slot/${slotId}/config`, payload);
+}
+
+function wireSlotCard(card, slot) {
+  const slotId = slot.slot;
+  card.querySelector('[data-action="save"]').addEventListener('click', async () => {
+    try {
+      await saveSlotConfig(slotId, card);
+      showFlash(`Slot ${slotId} zapisany.`);
+      await loadState();
+    } catch (e) {
+      showFlash(e.message, true);
+    }
+  });
+
+  card.querySelector('[data-action="buy"]').addEventListener('click', async () => {
+    try {
+      await saveSlotConfig(slotId, card);
+      const symbol = card.querySelector('[data-field="symbol"]').value;
+      await apiPost('/api/buy', {
+        slot: slotId,
+        symbol,
+        budget: card.querySelector('[data-field="budget"]').value,
+        tp_pct: card.querySelector('[data-field="tp_pct"]').value,
+        sl_pct: card.querySelector('[data-field="sl_pct"]').value,
+      });
+      showFlash(`BUY wykonany na slot ${slotId}.`);
+      await loadState();
+      if (symbol) {
+        currentSymbol = symbol;
+        $('pairSelect').value = symbol;
+        await refreshChart(true);
+      }
+    } catch (e) {
+      showFlash(e.message, true);
+    }
+  });
+
+  card.querySelector('[data-action="sell"]').addEventListener('click', async () => {
+    try {
+      await apiPost('/api/sell', { slot: slotId });
+      showFlash(`SELL wykonany na slot ${slotId}.`);
+      await loadState();
+    } catch (e) {
+      showFlash(e.message, true);
+    }
+  });
+
+  card.querySelector('[data-action="chart"]').addEventListener('click', async () => {
+    const symbol = card.querySelector('[data-field="symbol"]').value;
+    if (!symbol) return;
+    currentSymbol = symbol;
+    $('pairSelect').value = symbol;
+    await refreshChart(true);
+  });
+}
+
 function renderSlots(slots) {
   const wrap = $('positionsCards');
   wrap.innerHTML = '';
-  slots.forEach((pos) => {
+  slots.forEach((slot) => {
     const card = document.createElement('div');
     card.className = 'card slot-card';
-    if (pos.status !== 'OPEN') {
-      card.innerHTML = `<h3>Slot ${pos.slot}</h3><div class="muted">Pusty</div>`;
-      wrap.appendChild(card);
-      return;
-    }
-    const pnlClass = Number(pos.pnl_pct || 0) >= 0 ? 'green' : 'red';
-    card.innerHTML = `
-      <h3>Slot ${pos.slot} · ${pos.symbol}</h3>
-      <div class="kv">
-        <div>Entry</div><div>${fmt(pos.entry_price, 6)}</div>
-        <div>Current</div><div>${fmt(pos.current_price, 6)}</div>
-        <div>Qty</div><div>${fmt(pos.quantity, 6)}</div>
-        <div>TP / SL</div><div>${fmt(pos.tp_price,6)} / ${fmt(pos.sl_price,6)}</div>
-        <div>Status</div><div>${pos.status}</div>
-        <div>PnL %</div><div class="${pnlClass}">${fmt(pos.pnl_pct, 2)}%</div>
-        <div>PnL value</div><div class="${pnlClass}">${fmt(pos.pnl_value, 4)}</div>
-      </div>`;
+    card.innerHTML = slotCardHtml(slot);
     wrap.appendChild(card);
+    wireSlotCard(card, slot);
   });
 }
 
@@ -174,13 +260,29 @@ function applyIncremental(nextData) {
     lastChartPayload = nextData;
     return;
   }
+
+  const prevCandles = lastChartPayload.candles || [];
   const nextCandles = nextData.candles || [];
   if (!nextCandles.length) return;
-  const lastCandle = nextCandles[nextCandles.length - 1];
-  candleSeries.update(lastCandle);
+
+  const prevLast = prevCandles[prevCandles.length - 1];
+  const nextLast = nextCandles[nextCandles.length - 1];
+  if (!prevLast || !nextLast || nextCandles.length < 20) {
+    setBaseChart(nextData, false);
+    lastChartPayload = nextData;
+    return;
+  }
+
+  if (prevLast.time === nextLast.time) {
+    candleSeries.update(nextLast);
+  } else {
+    candleSeries.update(nextLast);
+  }
 
   const updateLast = (series, values) => {
-    if (Array.isArray(values) && values.length) series.update(values[values.length - 1]);
+    if (Array.isArray(values) && values.length) {
+      series.update(values[values.length - 1]);
+    }
   };
   updateLast(ema9Series, nextData.ema9);
   updateLast(ema21Series, nextData.ema21);
@@ -193,6 +295,7 @@ function applyIncremental(nextData) {
     rsi30Series.update({ time: t, value: 30 });
     rsi70Series.update({ time: t, value: 70 });
   }
+
   candleSeries.setMarkers(nextData.markers || []);
   lastChartPayload = nextData;
 }
@@ -203,6 +306,7 @@ async function refreshChart(fit = false) {
   currentSymbol = symbol;
   currentInterval = $('intervalSelect').value || '1m';
   $('chartTitle').textContent = `Wykres · ${symbol} · ${currentInterval}`;
+
   const data = await apiGet(`/api/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(currentInterval)}`);
   setBaseChart(data, fit);
   updateIndicators(data);
@@ -214,7 +318,7 @@ async function refreshChart(fit = false) {
 }
 
 async function refreshChartTick() {
-  if (chartPollingInFlight) return;
+  if (chartPollingInFlight || !currentSymbol) return;
   chartPollingInFlight = true;
   try {
     const data = await apiGet(`/api/candles?symbol=${encodeURIComponent(currentSymbol)}&interval=${encodeURIComponent(currentInterval)}`);
@@ -232,21 +336,24 @@ async function refreshChartTick() {
 }
 
 function startChartPolling() {
-  if (chartPollingTimer) return;
-  const intervalMs = Math.max(1000, Number(state?.config?.ui?.refresh_interval_sec || 1) * 1000);
+  if (chartPollingTimer) clearInterval(chartPollingTimer);
+  const intervalMs = Math.max(700, Number(state?.config?.ui?.refresh_interval_sec || 0.8) * 1000);
   chartPollingTimer = setInterval(refreshChartTick, intervalMs);
 }
 
 function startStateRefresh() {
   if (stateRefreshTimer) return;
-  stateRefreshTimer = setInterval(loadState, 5000);
+  stateRefreshTimer = setInterval(loadState, 3000);
 }
 
 async function loadState() {
   state = await apiGet('/api/state');
-  setSelectOptions($('slotSelect'), state.slots, $('slotSelect').value || 1);
-  setSelectOptions($('pairSelect'), (await apiGet('/api/symbols/all')).symbols || [], currentSymbol || state.default_symbol);
-  currentSymbol = $('pairSelect').value || state.default_symbol;
+  if (!symbolsCache.length) {
+    const symbolsResponse = await apiGet('/api/symbols/all');
+    symbolsCache = symbolsResponse.symbols || [];
+    setSelectOptions($('pairSelect'), symbolsCache, currentSymbol || state.default_symbol);
+  }
+  currentSymbol = currentSymbol || $('pairSelect').value || state.default_symbol;
 
   $('scanStatus').textContent = `${state.scanner_status.last_status || '-'}${state.scanner_status.running ? ' · running' : ''}`;
   $('lastScan').textContent = state.scanner_status.last_scan_at || '-';
@@ -257,31 +364,16 @@ async function loadState() {
   renderTrades(state.trades || []);
 }
 
-async function handleBuy() {
-  try {
-    await apiPost('/api/buy', { symbol: $('pairSelect').value, slot: $('slotSelect').value, budget: $('budgetInput').value, tp_pct: $('tpInput').value, sl_pct: $('slInput').value });
-    showFlash('BUY wykonany');
-    await loadState();
-  } catch (e) {
-    showFlash(e.message, true);
-  }
-}
-
-async function handleSell() {
-  try {
-    await apiPost('/api/sell', { slot: $('slotSelect').value, symbol: $('pairSelect').value });
-    showFlash('SELL wykonany');
-    await loadState();
-  } catch (e) {
-    showFlash(e.message, true);
-  }
-}
-
 document.addEventListener('DOMContentLoaded', async () => {
   initCharts();
-  $('buyBtn').addEventListener('click', handleBuy);
-  $('sellBtn').addEventListener('click', handleSell);
-  $('scanBtn').addEventListener('click', async () => await apiPost('/api/scan/run', {}));
+  $('scanBtn').addEventListener('click', async () => {
+    try {
+      await apiPost('/api/scan/run', {});
+      showFlash('Ręczny scan uruchomiony.');
+    } catch (e) {
+      showFlash(e.message, true);
+    }
+  });
   $('refreshBtn').addEventListener('click', async () => await refreshChart(true));
 
   $('pairSelect').addEventListener('change', async () => {
