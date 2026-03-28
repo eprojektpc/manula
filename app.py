@@ -63,11 +63,61 @@ def login_required(fn):
     return wrapped
 
 
+def _slot_settings_map() -> dict[int, dict[str, Any]]:
+    cfg = load_config()
+    rows = storage.get_slot_settings(int(cfg['trading']['slot_count']))
+    out: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        item = dict(row)
+        item['auto_enabled'] = bool(item.get('auto_enabled'))
+        out[int(item['slot'])] = item
+    return out
+
+
 class ScreenerWorker(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
         self.stop_event = threading.Event()
         self.trigger_event = threading.Event()
+
+    def _run_auto_entries(self, candidates: list[dict[str, Any]]) -> None:
+        cfg = load_config()
+        cands = [str(c.get('symbol') or '').upper() for c in candidates if c.get('symbol')]
+        if not cands:
+            return
+
+        open_map = {int(p['slot']): p for p in storage.get_open_positions()}
+        used_symbols = {str(p['symbol']).upper() for p in open_map.values()}
+        settings = _slot_settings_map()
+
+        for slot, slot_cfg in settings.items():
+            if not slot_cfg.get('auto_enabled') or slot in open_map:
+                continue
+
+            preferred = str(slot_cfg.get('symbol') or '').upper().strip()
+            target_symbol = preferred if preferred else None
+            if target_symbol and target_symbol in used_symbols:
+                continue
+            if not target_symbol:
+                for cand in cands:
+                    if cand not in used_symbols:
+                        target_symbol = cand
+                        break
+            if not target_symbol:
+                continue
+
+            try:
+                execute_buy(
+                    symbol=target_symbol,
+                    slot=slot,
+                    budget=float(slot_cfg['budget']) if slot_cfg.get('budget') not in (None, '') else None,
+                    tp_pct=float(slot_cfg['tp_pct']) if slot_cfg.get('tp_pct') not in (None, '') else None,
+                    sl_pct=float(slot_cfg['sl_pct']) if slot_cfg.get('sl_pct') not in (None, '') else None,
+                    reason='AUTO_SCAN',
+                )
+                used_symbols.add(target_symbol)
+            except Exception:
+                continue
 
     def run_once(self) -> None:
         cfg = load_config()
@@ -79,6 +129,7 @@ class ScreenerWorker(threading.Thread):
             candidates = run_scan(cfg)
             run_status = 'OK' if candidates else 'EMPTY'
             storage.save_scan_results(scan_time, run_status, candidates, meta={'quote_asset': cfg['trading']['quote_asset']})
+            self._run_auto_entries(candidates)
             status.update({
                 'running': False,
                 'enabled': bool(cfg['scanner']['enabled']),
@@ -161,7 +212,7 @@ def get_open_position_by_symbol(symbol: str) -> dict[str, Any] | None:
     return None
 
 
-def execute_buy(symbol: str, slot: int, budget: float | None = None, tp_pct: float | None = None, sl_pct: float | None = None) -> dict[str, Any]:
+def execute_buy(symbol: str, slot: int, budget: float | None = None, tp_pct: float | None = None, sl_pct: float | None = None, reason: str = 'MANUAL_BUY') -> dict[str, Any]:
     cfg = load_config()
     symbol = str(symbol or '').upper().strip()
     if not symbol:
@@ -169,9 +220,10 @@ def execute_buy(symbol: str, slot: int, budget: float | None = None, tp_pct: flo
     if storage.get_open_position(slot):
         raise ValueError(f'Slot {slot} jest już zajęty.')
 
-    budget_final = float(budget if budget is not None else cfg['trading']['default_budget'])
-    tp_final = float(tp_pct if tp_pct is not None else cfg['trading']['tp_pct'])
-    sl_final = float(sl_pct if sl_pct is not None else cfg['trading']['sl_pct'])
+    settings = _slot_settings_map().get(int(slot), {})
+    budget_final = float(budget if budget is not None else settings.get('budget') or cfg['trading']['default_budget'])
+    tp_final = float(tp_pct if tp_pct is not None else settings.get('tp_pct') or cfg['trading']['tp_pct'])
+    sl_final = float(sl_pct if sl_pct is not None else settings.get('sl_pct') or cfg['trading']['sl_pct'])
 
     chart = build_chart_payload(symbol, interval='1m', fuel_cfg=cfg.get('fuel', {}))
     order = buy_quote(symbol, budget_final)
@@ -195,6 +247,7 @@ def execute_buy(symbol: str, slot: int, budget: float | None = None, tp_pct: flo
         fuel_score=float(chart.get('fuel', {}).get('score', 0.0)),
         pattern_info=str(chart.get('pattern', {}).get('name') or ''),
     )
+    storage.upsert_slot_setting(slot=slot, updated_at=now, symbol=symbol, budget=budget_final, tp_pct=tp_final, sl_pct=sl_final)
     storage.record_trade(
         slot=slot,
         symbol=symbol,
@@ -204,7 +257,7 @@ def execute_buy(symbol: str, slot: int, budget: float | None = None, tp_pct: flo
         value=float(order['value']),
         pnl_pct=None,
         pnl_value=None,
-        reason='MANUAL_BUY',
+        reason=reason,
         order_id=order.get('order_id'),
         created_at=now,
     )
@@ -287,15 +340,29 @@ def _slots_payload() -> list[dict[str, Any]]:
     cfg = load_config()
     slot_count = int(cfg['trading']['slot_count'])
     open_map = {int(x['slot']): x for x in storage.get_open_positions()}
+    settings = _slot_settings_map()
     slots: list[dict[str, Any]] = []
     for slot in range(1, slot_count + 1):
         pos = open_map.get(slot)
+        setting = settings.get(slot, {})
+        realized = storage.slot_realized_pnl(slot)
+        base = {
+            'slot': slot,
+            'symbol': setting.get('symbol') or (pos or {}).get('symbol') or default_symbol(),
+            'auto_enabled': bool(setting.get('auto_enabled')),
+            'config_budget': setting.get('budget'),
+            'config_tp_pct': setting.get('tp_pct'),
+            'config_sl_pct': setting.get('sl_pct'),
+            'realized_pnl': realized,
+        }
         if pos:
-            pos = dict(pos)
-            pos['status'] = 'OPEN'
-            slots.append(pos)
+            item = dict(pos)
+            item.update(base)
+            item['status'] = 'OPEN'
+            slots.append(item)
         else:
-            slots.append({'slot': slot, 'status': 'EMPTY'})
+            base.update({'status': 'EMPTY', 'pnl_pct': 0.0, 'pnl_value': 0.0})
+            slots.append(base)
     return slots
 
 
@@ -365,10 +432,32 @@ def api_state():
     })
 
 
+@app.route('/api/slot/<int:slot>/config', methods=['POST'])
+@login_required
+def api_slot_config(slot: int):
+    data = request.get_json(force=True, silent=True) or {}
+    symbol = str(data.get('symbol') or '').upper().strip()
+    auto_enabled = bool(data.get('auto_enabled')) if 'auto_enabled' in data else None
+    budget = float(data['budget']) if data.get('budget') not in (None, '') else None
+    tp_pct = float(data['tp_pct']) if data.get('tp_pct') not in (None, '') else None
+    sl_pct = float(data['sl_pct']) if data.get('sl_pct') not in (None, '') else None
+
+    storage.upsert_slot_setting(
+        slot=slot,
+        symbol=symbol if symbol else None,
+        auto_enabled=auto_enabled,
+        budget=budget,
+        tp_pct=tp_pct,
+        sl_pct=sl_pct,
+        updated_at=utc_now_iso(),
+    )
+    return jsonify({'ok': True, 'slot': slot})
+
+
 @app.route('/api/candles')
 @login_required
 def api_candles():
-    symbol = request.args.get('symbol') or default_symbol()
+    symbol = (request.args.get('symbol') or default_symbol()).upper()
     interval = (request.args.get('interval') or '1m').strip()
     cfg = load_config()
     payload = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
@@ -389,7 +478,7 @@ def api_candles():
         'last_candle_time': last_candle.get('time'),
         'last_candle_close': last_candle.get('close'),
         'status': 'ok',
-        'poll_interval_sec': int(cfg.get('ui', {}).get('refresh_interval_sec', 1)),
+        'poll_interval_sec': float(cfg.get('ui', {}).get('refresh_interval_sec', 1)),
     }
     return jsonify(payload)
 
@@ -453,9 +542,12 @@ def api_scan_run():
 @login_required
 def api_buy():
     data = request.get_json(force=True, silent=True) or {}
+    slot = int(data.get('slot'))
+    slot_cfg = _slot_settings_map().get(slot, {})
+    symbol = str(data.get('symbol') or slot_cfg.get('symbol') or '').upper().strip()
     result = execute_buy(
-        symbol=str(data.get('symbol') or '').upper(),
-        slot=int(data.get('slot')),
+        symbol=symbol,
+        slot=slot,
         budget=float(data['budget']) if data.get('budget') not in (None, '') else None,
         tp_pct=float(data['tp_pct']) if data.get('tp_pct') not in (None, '') else None,
         sl_pct=float(data['sl_pct']) if data.get('sl_pct') not in (None, '') else None,

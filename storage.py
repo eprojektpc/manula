@@ -97,6 +97,16 @@ def init_db() -> None:
             value TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS slot_settings (
+            slot INTEGER PRIMARY KEY,
+            symbol TEXT,
+            auto_enabled INTEGER NOT NULL DEFAULT 0,
+            budget REAL,
+            tp_pct REAL,
+            sl_pct REAL,
+            updated_at TEXT NOT NULL
+        );
         '''
     )
 
@@ -229,6 +239,68 @@ def list_trades(limit: int = 100) -> list[dict[str, Any]]:
     rows = conn.execute('SELECT * FROM trades ORDER BY id DESC LIMIT ?', (int(limit),)).fetchall()
     conn.close()
     return rows_to_dicts(rows)
+
+
+def slot_realized_pnl(slot: int) -> float:
+    conn = connect()
+    row = conn.execute('SELECT COALESCE(SUM(pnl_value), 0) AS pnl FROM trades WHERE slot=? AND side="SELL"', (int(slot),)).fetchone()
+    conn.close()
+    return float(row['pnl'] or 0.0)
+
+
+def get_slot_setting(slot: int) -> dict[str, Any] | None:
+    conn = connect()
+    row = conn.execute('SELECT * FROM slot_settings WHERE slot=?', (int(slot),)).fetchone()
+    conn.close()
+    return row_to_dict(row)
+
+
+def get_slot_settings(slot_count: int) -> list[dict[str, Any]]:
+    conn = connect()
+    rows = conn.execute('SELECT * FROM slot_settings ORDER BY slot ASC').fetchall()
+    existing = {int(row['slot']): dict(row) for row in rows}
+
+    now_iso = '1970-01-01T00:00:00+00:00'
+    out: list[dict[str, Any]] = []
+    for slot in range(1, int(slot_count) + 1):
+        row = existing.get(slot)
+        if row is None:
+            conn.execute(
+                'INSERT OR IGNORE INTO slot_settings(slot, symbol, auto_enabled, budget, tp_pct, sl_pct, updated_at) VALUES (?, ?, 0, NULL, NULL, NULL, ?)',
+                (slot, '', now_iso),
+            )
+            row = {'slot': slot, 'symbol': '', 'auto_enabled': 0, 'budget': None, 'tp_pct': None, 'sl_pct': None, 'updated_at': now_iso}
+        out.append(row)
+    conn.commit()
+    conn.close()
+    return out
+
+
+def upsert_slot_setting(slot: int, updated_at: str, *, symbol: str | None = None, auto_enabled: bool | None = None, budget: float | None = None, tp_pct: float | None = None, sl_pct: float | None = None) -> None:
+    current = get_slot_setting(slot) or {'slot': slot, 'symbol': '', 'auto_enabled': 0, 'budget': None, 'tp_pct': None, 'sl_pct': None}
+    next_symbol = str(symbol if symbol is not None else current.get('symbol') or '').upper().strip()
+    next_auto = int(bool(auto_enabled)) if auto_enabled is not None else int(current.get('auto_enabled') or 0)
+    next_budget = float(budget) if budget is not None else current.get('budget')
+    next_tp = float(tp_pct) if tp_pct is not None else current.get('tp_pct')
+    next_sl = float(sl_pct) if sl_pct is not None else current.get('sl_pct')
+
+    conn = connect()
+    conn.execute(
+        '''
+        INSERT INTO slot_settings(slot, symbol, auto_enabled, budget, tp_pct, sl_pct, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(slot) DO UPDATE SET
+            symbol=excluded.symbol,
+            auto_enabled=excluded.auto_enabled,
+            budget=excluded.budget,
+            tp_pct=excluded.tp_pct,
+            sl_pct=excluded.sl_pct,
+            updated_at=excluded.updated_at
+        ''',
+        (int(slot), next_symbol, next_auto, next_budget, next_tp, next_sl, updated_at),
+    )
+    conn.commit()
+    conn.close()
 
 
 def save_scan_results(scan_time: str, status: str, candidates: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> int:

@@ -11,13 +11,16 @@
 body { margin: 0; font-family: Inter, Arial, sans-serif; background: var(--bg); color: var(--text); }
 .page { max-width: 1480px; margin: 0 auto; padding: 16px; }
 .hero, .panel, .status-box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
-.hero { display: flex; justify-content: space-between; padding: 16px; margin-bottom: 16px; }
+.hero { display: flex; justify-content: space-between; padding: 16px; margin-bottom: 16px; gap: 12px; }
 .panel { padding: 14px; margin-bottom: 16px; }
 .status-box { padding: 10px; min-width: 280px; }
 .controls-grid { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 10px; }
+.controls-grid-top { grid-template-columns: repeat(2, minmax(190px, 1fr)); max-width: 540px; }
 label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
 input, select, button { background: #0f151d; border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 10px; }
+input[type="checkbox"] { width: 18px; height: 18px; accent-color: #22c55e; }
 button { cursor: pointer; }
+button:disabled { opacity: .55; cursor: not-allowed; }
 button.primary { background: #155724; }
 button.danger { background: #8a1f1f; }
 .button-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
@@ -27,6 +30,10 @@ button.danger { background: #8a1f1f; }
 .cards { display: grid; gap: 12px; }
 .slots-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .card { border: 1px solid var(--line); background: #0f151d; border-radius: 12px; padding: 12px; }
+.slot-card h3 { margin: 0 0 8px; }
+.slot-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.checkbox-inline { flex-direction: row; align-items: center; gap: 8px; align-self: end; }
+.slot-actions { margin-top: 6px; margin-bottom: 10px; }
 .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; }
 .green { color: var(--profit); }
 .red { color: var(--loss); }
@@ -43,10 +50,11 @@ th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px 5p
 @media (max-width: 1100px) {
   .layout-main { grid-template-columns: 1fr; }
   .controls-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .slots-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 720px) {
   .hero { flex-direction: column; }
-  .controls-grid { grid-template-columns: 1fr; }
+  .controls-grid, .controls-grid-top, .slot-form-grid { grid-template-columns: 1fr; }
   .slots-grid { grid-template-columns: 1fr; }
   .chart { height: 280px; }
   .chart.rsi { height: 130px; }
