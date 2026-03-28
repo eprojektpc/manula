@@ -14,8 +14,6 @@ body { margin: 0; font-family: Inter, Arial, sans-serif; background: var(--bg); 
 .hero { display: flex; justify-content: space-between; padding: 16px; margin-bottom: 16px; gap: 12px; }
 .panel { padding: 14px; margin-bottom: 16px; }
 .status-box { padding: 10px; min-width: 280px; }
-.controls-grid { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 10px; }
-.controls-grid-top { grid-template-columns: repeat(2, minmax(190px, 1fr)); max-width: 540px; }
 label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
 input, select, button { background: #0f151d; border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 10px; }
 input[type="checkbox"] { width: 18px; height: 18px; accent-color: #22c55e; }
@@ -24,16 +22,16 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 button.primary { background: #155724; }
 button.danger { background: #8a1f1f; }
 .button-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-.layout-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
-.chart { width: 100%; height: 340px; border-radius: 12px; border: 1px solid var(--line); }
-.chart.rsi { height: 160px; margin-top: 10px; }
+.layout-main { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.side-stack { display: grid; gap: 16px; }
 .cards { display: grid; gap: 12px; }
 .slots-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .card { border: 1px solid var(--line); background: #0f151d; border-radius: 12px; padding: 12px; }
 .slot-card h3 { margin: 0 0 8px; }
-.slot-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.slot-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
 .checkbox-inline { flex-direction: row; align-items: center; gap: 8px; align-self: end; }
 .slot-actions { margin-top: 6px; margin-bottom: 10px; }
+.slot-indicators { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; }
 .green { color: var(--profit); }
 .red { color: var(--loss); }
@@ -42,29 +40,44 @@ table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px 5px; font-size: 13px; }
 .flash { min-height: 18px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
-.stats-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .chart-debug-box { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; color: var(--muted); }
-.linklike { border: 0; background: transparent; color: #93c5fd; padding: 0; }
 
 .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .trades-table { min-width: 760px; }
-.slot-chart-wrap { margin: 8px 0 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: #0b1017; }
-.slot-chart-header { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-.slot-chart { width: 100%; height: 160px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+
+.slot-chart-wrap { margin: 8px 0 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #0b1017; overflow: hidden; }
+.slot-chart-header { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.slot-chart-main,
+.slot-chart-rsi {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.slot-chart-main { height: 280px; }
+.slot-chart-rsi { height: 150px; margin-top: 8px; }
+.slot-debug-box { margin-bottom: 0; }
+
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .login-card { width: min(420px, 100%); }
-@media (max-width: 1100px) {
-  .layout-main { grid-template-columns: 1fr; }
-  .controls-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .slots-grid { grid-template-columns: 1fr 1fr; }
+
+@media (max-width: 1200px) {
+  .slots-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .slot-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
 @media (max-width: 720px) {
+  .page { padding: 10px; }
   .hero { flex-direction: column; }
-  .controls-grid, .controls-grid-top, .slot-form-grid { grid-template-columns: 1fr; }
+  .status-box { min-width: 0; width: 100%; }
   .slots-grid { grid-template-columns: 1fr; }
-  .chart { height: 280px; }
-  .chart.rsi { height: 130px; }
-  .slot-chart { height: 140px; }
+  .slot-card { width: 100%; }
+  .slot-form-grid { grid-template-columns: 1fr; }
+  .slot-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .slot-indicators { flex-direction: column; }
+  .kv { grid-template-columns: 1fr; }
+  .slot-chart-main { height: clamp(300px, 58vw, 420px); }
+  .slot-chart-rsi { height: clamp(140px, 28vw, 190px); }
   .trades-table { min-width: 680px; }
   button { min-height: 44px; }
 }

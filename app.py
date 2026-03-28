@@ -336,6 +336,40 @@ def _asset_version(filename: str) -> int:
         return int(time.time())
 
 
+
+
+def _markers_for_symbol(symbol: str) -> list[dict[str, Any]]:
+    markers = []
+    for pos in storage.get_open_positions():
+        if pos['symbol'] == symbol:
+            try:
+                ts = int(datetime.fromisoformat(pos['opened_at']).timestamp())
+            except Exception:
+                ts = int(time.time())
+            markers.append({
+                'time': ts,
+                'position': 'belowBar',
+                'color': '#22c55e',
+                'shape': 'arrowUp',
+                'text': f"ENTRY S{pos['slot']} @ {float(pos['entry_price']):.6f}",
+            })
+    return markers
+
+
+def _with_chart_debug(payload: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    candles = payload.get('candles') or []
+    last_candle = candles[-1] if candles else {}
+    payload['debug'] = {
+        'last_update_time': datetime.now(timezone.utc).isoformat(),
+        'server_time': int(time.time()),
+        'last_candle_time': last_candle.get('time'),
+        'last_candle_close': last_candle.get('close'),
+        'status': 'ok',
+        'poll_interval_sec': float(cfg.get('ui', {}).get('refresh_interval_sec', 1)),
+    }
+    payload['current_price'] = last_candle.get('close')
+    return payload
+
 def _slots_payload() -> list[dict[str, Any]]:
     cfg = load_config()
     slot_count = int(cfg['trading']['slot_count'])
@@ -455,6 +489,30 @@ def api_slot_config(slot: int):
 
 
 
+@app.route('/api/slot_chart')
+@login_required
+def api_slot_chart():
+    cfg = load_config()
+    slot_count = int(cfg['trading']['slot_count'])
+    slot = int(request.args.get('slot_id', 0))
+    if slot < 1 or slot > slot_count:
+        raise ValueError(f'Nieprawidłowy slot. Użyj 1..{slot_count}.')
+
+    interval = (request.args.get('interval') or '1m').strip()
+    slot_map = {int(item['slot']): item for item in _slots_payload()}
+    slot_item = slot_map.get(slot)
+
+    requested_symbol = str(request.args.get('symbol') or '').upper().strip()
+    symbol = requested_symbol or str((slot_item or {}).get('symbol') or default_symbol()).upper().strip()
+
+    payload = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
+    payload['slot'] = slot
+    payload['symbol'] = symbol
+    payload['markers'] = _markers_for_symbol(symbol)
+    payload = _with_chart_debug(payload, cfg)
+    return jsonify(payload)
+
+
 @app.route('/chart-data')
 @login_required
 def chart_data():
@@ -468,9 +526,12 @@ def chart_data():
     slot_map = {int(item['slot']): item for item in _slots_payload()}
     slot_item = slot_map.get(slot)
     symbol = str((slot_item or {}).get('symbol') or default_symbol()).upper().strip()
+
     payload = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
     payload['slot'] = slot
     payload['symbol'] = symbol
+    payload['markers'] = _markers_for_symbol(symbol)
+    payload = _with_chart_debug(payload, cfg)
     return jsonify(payload)
 
 
@@ -481,25 +542,8 @@ def api_candles():
     interval = (request.args.get('interval') or '1m').strip()
     cfg = load_config()
     payload = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
-    markers = []
-    for pos in storage.get_open_positions():
-        if pos['symbol'] == symbol:
-            try:
-                ts = int(datetime.fromisoformat(pos['opened_at']).timestamp())
-            except Exception:
-                ts = int(time.time())
-            markers.append({'time': ts, 'position': 'belowBar', 'color': '#22c55e', 'shape': 'arrowUp', 'text': f"ENTRY S{pos['slot']} @ {float(pos['entry_price']):.6f}"})
-    payload['markers'] = markers
-    candles = payload.get('candles') or []
-    last_candle = candles[-1] if candles else {}
-    payload['debug'] = {
-        'last_update_time': datetime.now(timezone.utc).isoformat(),
-        'server_time': int(time.time()),
-        'last_candle_time': last_candle.get('time'),
-        'last_candle_close': last_candle.get('close'),
-        'status': 'ok',
-        'poll_interval_sec': float(cfg.get('ui', {}).get('refresh_interval_sec', 1)),
-    }
+    payload['markers'] = _markers_for_symbol(symbol)
+    payload = _with_chart_debug(payload, cfg)
     return jsonify(payload)
 
 
