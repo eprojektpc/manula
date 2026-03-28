@@ -74,6 +74,28 @@ def _slot_settings_map() -> dict[int, dict[str, Any]]:
     return out
 
 
+def _preferred_and_reserved_symbols(slot: int) -> tuple[str | None, set[str]]:
+    settings = _slot_settings_map()
+    preferred = str(settings.get(slot, {}).get('symbol') or '').upper().strip() or None
+
+    reserved: set[str] = set()
+    for other_slot, row in settings.items():
+        if int(other_slot) == int(slot):
+            continue
+        sym = str(row.get('symbol') or '').upper().strip()
+        if sym:
+            reserved.add(sym)
+
+    for pos in storage.get_open_positions():
+        pos_slot = int(pos.get('slot') or 0)
+        if pos_slot == int(slot):
+            continue
+        sym = str(pos.get('symbol') or '').upper().strip()
+        if sym:
+            reserved.add(sym)
+    return preferred, reserved
+
+
 class ScreenerWorker(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -633,8 +655,35 @@ def api_slot_scan(slot: int):
             )
             return jsonify({'ok': False, 'slot': slot, 'message': 'Brak kandydatów.'}), 404
 
-        best = candidates[0]
-        best_symbol = str(best.get('symbol') or '').upper().strip()
+        preferred_symbol, reserved_symbols = _preferred_and_reserved_symbols(slot)
+        candidate_rows: list[tuple[str, dict[str, Any]]] = []
+        for row in candidates:
+            sym = str(row.get('symbol') or '').upper().strip()
+            if not sym:
+                continue
+            candidate_rows.append((sym, row))
+
+        chosen: tuple[str, dict[str, Any]] | None = None
+        if preferred_symbol:
+            for sym, row in candidate_rows:
+                if sym == preferred_symbol:
+                    chosen = (sym, row)
+                    break
+
+        if chosen is None:
+            for sym, row in candidate_rows:
+                if sym in reserved_symbols:
+                    continue
+                chosen = (sym, row)
+                break
+
+        if chosen is None and candidate_rows:
+            chosen = candidate_rows[0]
+
+        if chosen is None:
+            raise ValueError('Skan nie zwrócił poprawnego symbolu.')
+
+        best_symbol, best = chosen
         if not best_symbol:
             raise ValueError('Skan nie zwrócił poprawnego symbolu.')
 
