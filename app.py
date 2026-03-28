@@ -102,45 +102,6 @@ class ScreenerWorker(threading.Thread):
         self.stop_event = threading.Event()
         self.trigger_event = threading.Event()
 
-    def _run_auto_entries(self, candidates: list[dict[str, Any]]) -> None:
-        cfg = load_config()
-        cands = [str(c.get('symbol') or '').upper() for c in candidates if c.get('symbol')]
-        if not cands:
-            return
-
-        open_map = {int(p['slot']): p for p in storage.get_open_positions()}
-        used_symbols = {str(p['symbol']).upper() for p in open_map.values()}
-        settings = _slot_settings_map()
-
-        for slot, slot_cfg in settings.items():
-            if not slot_cfg.get('auto_enabled') or slot in open_map:
-                continue
-
-            preferred = str(slot_cfg.get('symbol') or '').upper().strip()
-            target_symbol = preferred if preferred else None
-            if target_symbol and target_symbol in used_symbols:
-                continue
-            if not target_symbol:
-                for cand in cands:
-                    if cand not in used_symbols:
-                        target_symbol = cand
-                        break
-            if not target_symbol:
-                continue
-
-            try:
-                execute_buy(
-                    symbol=target_symbol,
-                    slot=slot,
-                    budget=float(slot_cfg['budget']) if slot_cfg.get('budget') not in (None, '') else None,
-                    tp_pct=float(slot_cfg['tp_pct']) if slot_cfg.get('tp_pct') not in (None, '') else None,
-                    sl_pct=float(slot_cfg['sl_pct']) if slot_cfg.get('sl_pct') not in (None, '') else None,
-                    reason='AUTO_SCAN',
-                )
-                used_symbols.add(target_symbol)
-            except Exception:
-                continue
-
     def run_once(self) -> None:
         cfg = load_config()
         status = scanner_status()
@@ -151,7 +112,6 @@ class ScreenerWorker(threading.Thread):
             candidates = run_scan(cfg)
             run_status = 'OK' if candidates else 'EMPTY'
             storage.save_scan_results(scan_time, run_status, candidates, meta={'quote_asset': cfg['trading']['quote_asset']})
-            self._run_auto_entries(candidates)
             status.update({
                 'running': False,
                 'enabled': bool(cfg['scanner']['enabled']),
