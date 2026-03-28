@@ -10,8 +10,18 @@ const $ = (id) => document.getElementById(id);
 
 function showFlash(msg, isError = false) {
   const el = $('flash');
+  if (!el) return;
   el.textContent = msg || '';
   el.className = 'flash ' + (isError ? 'red' : 'green');
+}
+
+function showSlotFlash(slotId, msg, isError = false) {
+  const card = slotCards[slotId];
+  if (!card) return;
+  const el = card.querySelector('[data-role="slotFlash"]');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.className = 'slot-flash ' + (isError ? 'red' : 'green');
 }
 
 async function apiGet(url) {
@@ -68,18 +78,25 @@ function slotCardHtml(slot) {
       <label class="checkbox-inline"><input data-field="auto_enabled" type="checkbox"> Auto mode</label>
     </div>
 
-    <div class="button-row slot-actions">
+    <div class="button-row slot-actions trade-actions">
       <button class="primary" data-action="buy">BUY</button>
       <button class="danger" data-action="sell">SELL</button>
+    </div>
+
+    <div class="button-row slot-actions utility-actions">
       <button data-action="save">Zapisz slot</button>
+      <button data-action="scan">Skanuj slot ${slot.slot}</button>
       <button data-action="refresh-chart">Odśwież wykres</button>
     </div>
+    <div class="slot-flash" data-role="slotFlash"></div>
 
     <div class="slot-indicators" data-role="slot-indicators">
       <div class="pill">RSI: <span data-role="rsiValue">-</span></div>
       <div class="pill">Fuel: <span data-role="fuelIcons"></span> <span data-role="fuelText">-</span></div>
       <div class="pill">Pattern: <span data-role="patternAlert">-</span></div>
       <div class="pill">Price: <span data-role="currentPrice">-</span></div>
+      <div class="pill">PNL live %: <span data-role="pnlPct">0.00%</span></div>
+      <div class="pill">PNL live: <span data-role="pnlLive">0.0000</span></div>
     </div>
 
     <div class="slot-chart-wrap">
@@ -95,15 +112,15 @@ function slotCardHtml(slot) {
       </div>
     </div>
 
-    <div class="kv">
+    <div class="kv slot-meta">
       <div>Status</div><div data-role="status">-</div>
       <div>Pozycja</div><div data-role="position">-</div>
       <div>Current</div><div data-role="current">-</div>
       <div>Qty</div><div data-role="qty">-</div>
       <div>TP / SL</div><div data-role="tpSl">-</div>
-      <div>PNL live %</div><div data-role="pnlPct">-</div>
-      <div>PNL live</div><div data-role="pnlLive">-</div>
       <div>PNL realized</div><div data-role="pnlRealized">-</div>
+      <div>Ostatni scan</div><div data-role="slotLastScan">-</div>
+      <div>Wynik scan</div><div data-role="slotScanSymbol">-</div>
     </div>
   `;
 }
@@ -221,12 +238,14 @@ function updateSlotPanel(slotData) {
   const card = slotCards[slotData.slot];
   if (!card) return;
 
-  const pnlClass = Number(slotData.pnl_pct || 0) >= 0 ? 'green' : 'red';
+  const hasPosition = slotData.status === 'OPEN';
+  const pnlPct = Number(slotData.pnl_pct || 0);
+  const pnlValue = Number(slotData.pnl_value || 0);
+  const pnlClass = pnlPct >= 0 ? 'green' : 'red';
   const realizedClass = Number(slotData.realized_pnl || 0) >= 0 ? 'green' : 'red';
-  const isOpen = slotData.status === 'OPEN';
 
   const sellBtn = card.querySelector('[data-action="sell"]');
-  if (sellBtn) sellBtn.disabled = !isOpen;
+  if (sellBtn) sellBtn.disabled = !hasPosition;
 
   setInputValueIfIdle(card.querySelector('[data-field="budget"]'), slotData.config_budget ?? state?.config?.trading?.default_budget ?? 25);
   setInputValueIfIdle(card.querySelector('[data-field="tp_pct"]'), slotData.config_tp_pct ?? state?.config?.trading?.tp_pct ?? 0.7);
@@ -239,22 +258,26 @@ function updateSlotPanel(slotData) {
 
   setText(card, 'slotSymbol', slotData.symbol || '-');
   setText(card, 'status', slotData.status || '-');
-  setText(card, 'position', isOpen ? `${slotData.symbol} @ ${fmt(slotData.entry_price, 6)}` : 'Brak');
-  setText(card, 'current', isOpen ? fmt(slotData.current_price, 6) : '-');
-  setText(card, 'qty', isOpen ? fmt(slotData.quantity, 6) : '-');
-  setText(card, 'tpSl', isOpen ? `${fmt(slotData.tp_price, 6)} / ${fmt(slotData.sl_price, 6)}` : '-');
+  setText(card, 'position', hasPosition ? `${slotData.symbol} @ ${fmt(slotData.entry_price, 6)}` : 'Brak pozycji');
+  setText(card, 'current', hasPosition ? fmt(slotData.current_price, 6) : '-');
+  setText(card, 'qty', hasPosition ? fmt(slotData.quantity, 6) : '-');
+  setText(card, 'tpSl', hasPosition ? `${fmt(slotData.tp_price, 6)} / ${fmt(slotData.sl_price, 6)}` : '-');
 
   const pnlPctEl = card.querySelector('[data-role="pnlPct"]');
-  pnlPctEl.textContent = isOpen ? `${fmt(slotData.pnl_pct, 2)}%` : '0.00%';
+  pnlPctEl.textContent = hasPosition ? `${fmt(pnlPct, 2)}%` : '0.00%';
   pnlPctEl.className = pnlClass;
 
   const pnlLiveEl = card.querySelector('[data-role="pnlLive"]');
-  pnlLiveEl.textContent = fmt(slotData.pnl_value || 0, 4);
+  pnlLiveEl.textContent = hasPosition ? fmt(pnlValue, 4) : '0.0000';
   pnlLiveEl.className = pnlClass;
 
   const pnlRealizedEl = card.querySelector('[data-role="pnlRealized"]');
   pnlRealizedEl.textContent = fmt(slotData.realized_pnl || 0, 4);
   pnlRealizedEl.className = realizedClass;
+
+  const slotScan = state?.slot_scan_results?.[String(slotData.slot)] || null;
+  setText(card, 'slotLastScan', slotScan?.scan_time || '-');
+  setText(card, 'slotScanSymbol', slotScan?.symbol || '-');
 }
 
 async function saveSlotConfig(slotId, card) {
@@ -274,11 +297,11 @@ function wireSlotCard(card, slot) {
   card.querySelector('[data-action="save"]').addEventListener('click', async () => {
     try {
       await saveSlotConfig(slotId, card);
-      showFlash(`Slot ${slotId} zapisany.`);
+      showSlotFlash(slotId, `Slot ${slotId} zapisany.`);
       await loadState();
       await refreshSlotChart(slotId, true);
     } catch (e) {
-      showFlash(e.message, true);
+      showSlotFlash(slotId, e.message, true);
     }
   });
 
@@ -292,22 +315,35 @@ function wireSlotCard(card, slot) {
         tp_pct: card.querySelector('[data-field="tp_pct"]').value,
         sl_pct: card.querySelector('[data-field="sl_pct"]').value,
       });
-      showFlash(`BUY wykonany na slot ${slotId}.`);
+      showSlotFlash(slotId, `BUY wykonany na slot ${slotId}.`);
       await loadState();
       await refreshSlotChart(slotId, true);
     } catch (e) {
-      showFlash(e.message, true);
+      showSlotFlash(slotId, e.message, true);
     }
   });
 
   card.querySelector('[data-action="sell"]').addEventListener('click', async () => {
     try {
       await apiPost('/api/sell', { slot: slotId });
-      showFlash(`SELL wykonany na slot ${slotId}.`);
+      showSlotFlash(slotId, `SELL wykonany na slot ${slotId}.`);
       await loadState();
       await refreshSlotChart(slotId, true);
     } catch (e) {
-      showFlash(e.message, true);
+      showSlotFlash(slotId, e.message, true);
+    }
+  });
+
+  card.querySelector('[data-action="scan"]').addEventListener('click', async () => {
+    try {
+      const result = await apiPost(`/api/slot/${slotId}/scan`, {});
+      const symbolInput = card.querySelector('[data-field="symbol"]');
+      symbolInput.value = result.symbol;
+      await loadState();
+      await refreshSlotChart(slotId, true, true);
+      showSlotFlash(slotId, `Skan slotu ${slotId} zakończony. Wybrano ${result.symbol}.`);
+    } catch (e) {
+      showSlotFlash(slotId, e.message, true);
     }
   });
 
@@ -465,17 +501,9 @@ async function loadState() {
 document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('resize', resizeAllCharts);
 
-  $('scanBtn').addEventListener('click', async () => {
-    try {
-      await apiPost('/api/scan/run', {});
-      showFlash('Ręczny scan uruchomiony.');
-    } catch (e) {
-      showFlash(e.message, true);
-    }
-  });
-
   await loadState();
   await refreshAllSlotCharts();
   startChartPolling();
   startStateRefresh();
+  showFlash('Panel gotowy. Skanowanie dostępne per slot.');
 });

@@ -454,12 +454,16 @@ def api_settings():
 @login_required
 def api_state():
     cfg = load_config()
+    slot_scan_results: dict[str, Any] = {}
+    for slot in range(1, int(cfg['trading']['slot_count']) + 1):
+        slot_scan_results[str(slot)] = storage.get_slot_scan_result(slot)
     return jsonify({
         'config': cfg,
         'scanner_status': scanner_status(),
         'candidates': storage.latest_scan_candidates(10),
         'positions': storage.get_open_positions(),
         'slot_cards': _slots_payload(),
+        'slot_scan_results': slot_scan_results,
         'trades': storage.list_trades(50),
         'default_symbol': default_symbol(),
         'slots': list(range(1, int(cfg['trading']['slot_count']) + 1)),
@@ -600,6 +604,48 @@ def api_scans_history():
 def api_scan_run():
     SCREENING_WORKER.trigger_now()
     return jsonify({'ok': True, 'message': 'Scan został wyzwolony.'})
+
+
+@app.route('/api/slot/<int:slot>/scan', methods=['POST'])
+@login_required
+def api_slot_scan(slot: int):
+    cfg = load_config()
+    slot_count = int(cfg['trading']['slot_count'])
+    if slot < 1 or slot > slot_count:
+        raise ValueError(f'Nieprawidłowy slot. Użyj 1..{slot_count}.')
+
+    with _SCAN_LOCK:
+        candidates = run_scan(cfg)
+        scan_time = utc_now_iso()
+        run_status = 'OK' if candidates else 'EMPTY'
+        storage.save_scan_results(
+            scan_time,
+            run_status,
+            candidates,
+            meta={'quote_asset': cfg['trading']['quote_asset'], 'source': f'slot_{slot}'},
+        )
+
+        if not candidates:
+            storage.save_slot_scan_result(
+                slot,
+                {'status': 'EMPTY', 'symbol': None, 'scan_time': scan_time, 'message': 'Brak kandydatów dla slotu.'},
+                scan_time,
+            )
+            return jsonify({'ok': False, 'slot': slot, 'message': 'Brak kandydatów.'}), 404
+
+        best = candidates[0]
+        best_symbol = str(best.get('symbol') or '').upper().strip()
+        if not best_symbol:
+            raise ValueError('Skan nie zwrócił poprawnego symbolu.')
+
+        storage.upsert_slot_setting(slot=slot, symbol=best_symbol, updated_at=scan_time)
+        storage.save_slot_scan_result(
+            slot,
+            {'status': 'OK', 'symbol': best_symbol, 'scan_time': scan_time, 'candidate': best},
+            scan_time,
+        )
+
+    return jsonify({'ok': True, 'slot': slot, 'symbol': best_symbol, 'candidate': best, 'scan_time': scan_time})
 
 
 @app.route('/api/buy', methods=['POST'])

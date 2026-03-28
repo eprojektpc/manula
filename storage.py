@@ -156,6 +156,19 @@ def set_state(key: str, value: Any, updated_at: str) -> None:
     conn.close()
 
 
+def save_slot_scan_result(slot: int, result: dict[str, Any], updated_at: str) -> None:
+    key = f'slot_scan_result:{int(slot)}'
+    set_state(key, result, updated_at)
+
+
+def get_slot_scan_result(slot: int) -> dict[str, Any] | None:
+    key = f'slot_scan_result:{int(slot)}'
+    value = get_state(key, None)
+    if isinstance(value, dict):
+        return value
+    return None
+
+
 def get_open_position(slot: int) -> dict[str, Any] | None:
     conn = connect()
     row = conn.execute('SELECT * FROM positions WHERE slot=? AND status="OPEN"', (slot,)).fetchone()

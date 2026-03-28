@@ -30,12 +30,14 @@ button.danger { background: #8a1f1f; }
 .slot-card h3 { margin: 0 0 8px; }
 .slot-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
 .checkbox-inline { flex-direction: row; align-items: center; gap: 8px; align-self: end; }
-.slot-actions { margin-top: 6px; margin-bottom: 10px; }
+.slot-actions { margin-top: 6px; margin-bottom: 8px; }
+.trade-actions button { font-weight: 700; min-height: 46px; }
 .slot-indicators { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; }
 .green { color: var(--profit); }
 .red { color: var(--loss); }
 .muted { color: var(--muted); }
+.slot-flash { min-height: 18px; margin: 4px 0 8px; font-size: 12px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px 5px; font-size: 13px; }
 .flash { min-height: 18px; }
@@ -57,6 +59,7 @@ th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px 5p
 .slot-chart-main { height: 280px; }
 .slot-chart-rsi { height: 150px; margin-top: 8px; }
 .slot-debug-box { margin-bottom: 0; }
+.slot-meta { margin-top: 8px; }
 
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .login-card { width: min(420px, 100%); }
@@ -73,8 +76,12 @@ th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px 5p
   .slots-grid { grid-template-columns: 1fr; }
   .slot-card { width: 100%; }
   .slot-form-grid { grid-template-columns: 1fr; }
-  .slot-actions { display: grid; grid-template-columns: 1fr 1fr; }
-  .slot-indicators { flex-direction: column; }
+  .slot-actions { display: grid; grid-template-columns: 1fr; }
+  .trade-actions { grid-template-columns: 1fr 1fr; }
+  .trade-actions button,
+  .utility-actions button { width: 100%; }
+  .slot-indicators { flex-direction: column; width: 100%; }
+  .slot-indicators .pill { width: 100%; justify-content: space-between; }
   .kv { grid-template-columns: 1fr; }
   .slot-chart-main { height: clamp(300px, 58vw, 420px); }
   .slot-chart-rsi { height: clamp(140px, 28vw, 190px); }

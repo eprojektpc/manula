@@ -30,7 +30,9 @@ knife_filter:
   knife_filter_enabled: true
   knife_max_drop_pct: -3.0
   knife_rsi_threshold: 28.0
-  knife_lookback: 6
+  knife_lookback_bars: 6
+  knife_momentum_threshold: -0.25
+  knife_single_bar_drop_pct: -1.10
 
 scanner:
   enabled: true
