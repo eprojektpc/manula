@@ -67,7 +67,9 @@
 
     <section class="panel">
       <h2>Historia trade</h2>
-      <table><thead><tr><th>Czas</th><th>Slot</th><th>Para</th><th>Side</th><th>Price</th><th>Qty</th><th>PnL %</th><th>Reason</th></tr></thead><tbody id="tradesBody"></tbody></table>
+      <div class="table-scroll">
+        <table class="trades-table"><thead><tr><th>Czas</th><th>Slot</th><th>Para</th><th>Side</th><th>Price</th><th>Qty</th><th>PnL %</th><th>Reason</th></tr></thead><tbody id="tradesBody"></tbody></table>
+      </div>
     </section>
   </div>
   <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
