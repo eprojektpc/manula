@@ -212,9 +212,9 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any], knife_cfg: dict[str, Any]) 
     low = df['low']
     volume = df['volume']
 
-    ema9 = close.ewm(span=9, adjust=False).mean()
-    ema21 = close.ewm(span=21, adjust=False).mean()
-    ema50 = close.ewm(span=50, adjust=False).mean()
+    ema7 = close.ewm(span=7, adjust=False).mean()
+    ema25 = close.ewm(span=25, adjust=False).mean()
+    ema99 = close.ewm(span=99, adjust=False).mean()
     rsi = compute_rsi(close)
     macd_hist = compute_macd_hist(close)
     atr_pct = compute_atr_pct(df)
@@ -355,26 +355,26 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
 def build_chart_payload(symbol: str, interval: str = '1m', limit: int = 220, fuel_cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     df = klines_to_df(symbol, interval=interval, limit=limit, include_live=True)
     close = df['close']
-    ema9 = close.ewm(span=9, adjust=False).mean()
-    ema21 = close.ewm(span=21, adjust=False).mean()
-    ema50 = close.ewm(span=50, adjust=False).mean()
+    ema7 = close.ewm(span=7, adjust=False).mean()
+    ema25 = close.ewm(span=25, adjust=False).mean()
+    ema99 = close.ewm(span=99, adjust=False).mean()
     rsi = compute_rsi(close)
     macd_hist = compute_macd_hist(close)
 
-    candles, ema9_line, ema21_line, ema50_line, rsi_line = [], [], [], [], []
+    candles, ema7_line, ema25_line, ema99_line, rsi_line = [], [], [], [], []
     for pos, row in enumerate(df.itertuples(index=False)):
         ts = int(row.open_time.timestamp())
         o, h, l, c = float(row.open), float(row.high), float(row.low), float(row.close)
         if not all(math.isfinite(v) for v in (o, h, l, c)):
             continue
         candles.append({'time': ts, 'open': o, 'high': h, 'low': l, 'close': c})
-        e9, e21, e50, r = float(ema9.iloc[pos]), float(ema21.iloc[pos]), float(ema50.iloc[pos]), float(rsi.iloc[pos])
-        if math.isfinite(e9):
-            ema9_line.append({'time': ts, 'value': round(e9, 8)})
-        if math.isfinite(e21):
-            ema21_line.append({'time': ts, 'value': round(e21, 8)})
-        if math.isfinite(e50):
-            ema50_line.append({'time': ts, 'value': round(e50, 8)})
+        e7, e25, e99, r = float(ema7.iloc[pos]), float(ema25.iloc[pos]), float(ema99.iloc[pos]), float(rsi.iloc[pos])
+        if math.isfinite(e7):
+            ema7_line.append({'time': ts, 'value': round(e7, 8)})
+        if math.isfinite(e25):
+            ema25_line.append({'time': ts, 'value': round(e25, 8)})
+        if math.isfinite(e99):
+            ema99_line.append({'time': ts, 'value': round(e99, 8)})
         if math.isfinite(r):
             rsi_line.append({'time': ts, 'value': round(r, 4)})
 
@@ -385,9 +385,12 @@ def build_chart_payload(symbol: str, interval: str = '1m', limit: int = 220, fue
         'symbol': symbol,
         'interval': interval,
         'candles': candles,
-        'ema9': ema9_line,
-        'ema21': ema21_line,
-        'ema50': ema50_line,
+        'ema7': ema7_line,
+        'ema25': ema25_line,
+        'ema99': ema99_line,
+        'ema9': ema7_line,
+        'ema21': ema25_line,
+        'ema50': ema99_line,
         'rsi': rsi_line,
         'rsi_value': round(rsi_value, 2),
         'fuel': fuel,

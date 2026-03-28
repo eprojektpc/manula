@@ -23,40 +23,21 @@
     </header>
 
     <section class="toolbar panel">
-      <div class="controls-grid controls-grid-top">
-        <label>Para wykresu<select id="pairSelect"></select></label>
-        <label>Interwał
-          <select id="intervalSelect"><option>1m</option><option>3m</option><option>5m</option><option>15m</option><option>1h</option></select>
-        </label>
-      </div>
       <div class="button-row">
         <button id="scanBtn">Skanuj</button>
-        <button id="refreshBtn">Odśwież wykres</button>
       </div>
       <div id="flash" class="flash"></div>
     </section>
 
     <section class="layout-main">
-      <div class="panel">
-        <div class="charts-header"><h2 id="chartTitle">Wykres</h2></div>
-        <div class="stats-row">
-          <div class="pill">RSI: <span id="rsiValue">-</span></div>
-          <div class="pill">Fuel: <span id="fuelIcons"></span> <span id="fuelText"></span></div>
-          <div class="pill">Pattern: <span id="patternAlert">-</span></div>
-        </div>
-        <div id="candleChart" class="chart"></div>
-        <div id="rsiChart" class="chart rsi"></div>
-        <div class="chart-debug-box">
-          <div><strong>Debug</strong></div>
-          <div>last update time: <span id="debugLastUpdate">-</span></div>
-          <div>server time: <span id="debugServerTime">-</span></div>
-          <div>last candle time: <span id="debugLastCandleTime">-</span></div>
-          <div>status połączenia: <span id="debugConnection">-</span></div>
-        </div>
-      </div>
-
       <div class="side-stack">
-        <section class="panel"><h2>Kandydaci</h2><table><thead><tr><th>#</th><th>Para</th><th>Score</th><th>RSI</th></tr></thead><tbody id="candidatesBody"></tbody></table></section>
+        <section class="panel">
+          <h2>Kandydaci</h2>
+          <table>
+            <thead><tr><th>#</th><th>Para</th><th>Score</th><th>RSI</th></tr></thead>
+            <tbody id="candidatesBody"></tbody>
+          </table>
+        </section>
       </div>
     </section>
 
