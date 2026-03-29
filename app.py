@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from functools import wraps
 import os
 from pathlib import Path
+import sqlite3
 import threading
 import time
 from typing import Any
@@ -25,6 +26,10 @@ storage.init_db()
 
 _SCAN_LOCK = threading.Lock()
 _SELL_LOCK = threading.Lock()
+_COMBO_DB_PATH = '/root/screener-bot/screener.db'
+_COMBO_CACHE_TTL_SEC = 30.0
+_COMBO_CACHE_LOCK = threading.Lock()
+_COMBO_CACHE: dict[str, Any] = {'expires_at': 0.0, 'table': None, 'column_map': None}
 
 
 def utc_now_iso() -> str:
@@ -357,6 +362,187 @@ def _markers_for_symbol(symbol: str) -> list[dict[str, Any]]:
     return markers
 
 
+def _rsi_bucket(rsi_value: float) -> str:
+    if rsi_value < 30:
+        return 'lt30'
+    if rsi_value < 40:
+        return '30_39'
+    if rsi_value < 50:
+        return '40_49'
+    if rsi_value < 60:
+        return '50_59'
+    if rsi_value < 70:
+        return '60_69'
+    return 'ge70'
+
+
+def _fuel_bucket(fuel_score: float) -> str:
+    if fuel_score >= 2.3:
+        return 'high'
+    if fuel_score >= 1.0:
+        return 'mid'
+    return 'low'
+
+
+def _build_combo_key(payload: dict[str, Any]) -> str:
+    pattern_name = str((payload.get('pattern') or {}).get('name') or 'none').strip().lower()
+    fuel_score = float((payload.get('fuel') or {}).get('score') or 0.0)
+    rsi_value = float(payload.get('rsi_value') or 50.0)
+    return f'pattern={pattern_name}|fuel={_fuel_bucket(fuel_score)}|rsi={_rsi_bucket(rsi_value)}'
+
+
+def _pick_existing_column(cols: list[str], candidates: list[str]) -> str | None:
+    cols_set = {c.lower() for c in cols}
+    for item in candidates:
+        if item.lower() in cols_set:
+            return item
+    return None
+
+
+def _combo_table_info() -> tuple[str, dict[str, str]] | tuple[None, None]:
+    now = time.time()
+    with _COMBO_CACHE_LOCK:
+        if _COMBO_CACHE['expires_at'] > now:
+            return _COMBO_CACHE['table'], _COMBO_CACHE['column_map']
+
+    if not os.path.exists(_COMBO_DB_PATH):
+        with _COMBO_CACHE_LOCK:
+            _COMBO_CACHE.update({'expires_at': now + _COMBO_CACHE_TTL_SEC, 'table': None, 'column_map': None})
+        return None, None
+
+    table: str | None = None
+    column_map: dict[str, str] | None = None
+    try:
+        with sqlite3.connect(_COMBO_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            candidate_tables = [str(r['name']) for r in rows]
+            score_rows: list[tuple[int, str, dict[str, str]]] = []
+            for tbl in candidate_tables:
+                cols = [str(r['name']) for r in conn.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
+                combo_col = _pick_existing_column(cols, ['combo_key', 'combo', 'combo_id', 'key'])
+                if not combo_col:
+                    continue
+                col_map = {
+                    'combo_key': combo_col,
+                    'hit_tp_rate': _pick_existing_column(cols, ['hit_tp_rate', 'tp_rate', 'success_rate', 'win_rate']),
+                    'hits_tp': _pick_existing_column(cols, ['hits_tp', 'tp_hits', 'tp_count', 'wins']),
+                    'avg_max_profit': _pick_existing_column(cols, ['avg_max_profit', 'avg_profit', 'mean_max_profit']),
+                    'wilson': _pick_existing_column(cols, ['wilson', 'wilson_score', 'wilson_lb']),
+                    'n': _pick_existing_column(cols, ['n', 'trials', 'sample_size', 'count']),
+                    'last_ts': _pick_existing_column(cols, ['last_ts', 'updated_at', 'last_seen', 'ts']),
+                }
+                score = sum(1 for key in ['hit_tp_rate', 'hits_tp', 'avg_max_profit', 'wilson', 'n', 'last_ts'] if col_map.get(key))
+                name_bonus = 2 if any(x in tbl.lower() for x in ('combo', 'outcome', 'recommend')) else 0
+                score_rows.append((score + name_bonus, tbl, col_map))
+
+            if score_rows:
+                score_rows.sort(key=lambda x: x[0], reverse=True)
+                _, table, column_map = score_rows[0]
+    except Exception:
+        table, column_map = None, None
+
+    with _COMBO_CACHE_LOCK:
+        _COMBO_CACHE.update({'expires_at': now + _COMBO_CACHE_TTL_SEC, 'table': table, 'column_map': column_map})
+    return table, column_map
+
+
+def _fetch_combo_stats(combo_key: str) -> dict[str, Any] | None:
+    table, column_map = _combo_table_info()
+    if not table or not column_map:
+        return None
+
+    combo_col = column_map.get('combo_key')
+    if not combo_col:
+        return None
+
+    wanted = ['combo_key', 'hit_tp_rate', 'hits_tp', 'avg_max_profit', 'wilson', 'n', 'last_ts']
+    select_parts: list[str] = []
+    for key in wanted:
+        col = column_map.get(key)
+        if col:
+            select_parts.append(f'"{col}" AS "{key}"')
+        elif key == 'combo_key':
+            select_parts.append(f'"{combo_col}" AS "combo_key"')
+        else:
+            select_parts.append(f'NULL AS "{key}"')
+
+    query = f'''
+        SELECT {", ".join(select_parts)}
+        FROM "{table}"
+        WHERE "{combo_col}" = ?
+        ORDER BY COALESCE("last_ts", 0) DESC
+        LIMIT 1
+    '''
+    try:
+        with sqlite3.connect(_COMBO_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(query, (combo_key,)).fetchone()
+            if not row:
+                return None
+            return {key: row[key] for key in wanted}
+    except Exception:
+        return None
+
+
+def _combo_message_and_level(combo: dict[str, Any] | None) -> tuple[str, str]:
+    if not combo:
+        return 'Combo: brak danych historycznych', 'none'
+
+    hit_rate = float(combo.get('hit_tp_rate') or 0.0)
+    if hit_rate <= 1.0:
+        hit_rate *= 100.0
+    n = int(float(combo.get('n') or 0))
+    wilson = combo.get('wilson')
+    wilson_val = float(wilson) if wilson is not None else None
+
+    if wilson_val is not None:
+        if wilson_val >= 0.60 and n >= 20:
+            level = 'strong'
+            label = 'MOCNE COMBO'
+        elif wilson_val >= 0.50 and n >= 10:
+            level = 'medium'
+            label = 'ŚREDNIE COMBO'
+        else:
+            level = 'weak'
+            label = 'SŁABE COMBO'
+    else:
+        if hit_rate >= 60 and n >= 20:
+            level = 'strong'
+            label = 'MOCNE COMBO'
+        elif hit_rate >= 50 and n >= 10:
+            level = 'medium'
+            label = 'ŚREDNIE COMBO'
+        else:
+            level = 'weak'
+            label = 'SŁABE COMBO'
+
+    msg = f'Combo: {label} · skuteczność TP {hit_rate:.0f}% · próba {n}'
+    if wilson_val is not None:
+        msg += f' · wilson {wilson_val:.2f}'
+    return msg, level
+
+
+def _attach_combo_signal(payload: dict[str, Any]) -> dict[str, Any]:
+    combo_key = _build_combo_key(payload)
+    combo_stats = _fetch_combo_stats(combo_key)
+    message, level = _combo_message_and_level(combo_stats)
+
+    payload['combo_signal'] = {
+        'message': message,
+        'level': level,
+        'combo_key': combo_key,
+        'hit_tp_rate': combo_stats.get('hit_tp_rate') if combo_stats else None,
+        'hits_tp': combo_stats.get('hits_tp') if combo_stats else None,
+        'avg_max_profit': combo_stats.get('avg_max_profit') if combo_stats else None,
+        'wilson': combo_stats.get('wilson') if combo_stats else None,
+        'n': combo_stats.get('n') if combo_stats else None,
+        'last_ts': combo_stats.get('last_ts') if combo_stats else None,
+        'db_path': _COMBO_DB_PATH,
+    }
+    return payload
+
+
 def _with_chart_debug(payload: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     candles = payload.get('candles') or []
     last_candle = candles[-1] if candles else {}
@@ -539,6 +725,7 @@ def api_slot_chart():
     payload['slot'] = slot
     payload['symbol'] = symbol
     payload['markers'] = _markers_for_symbol(symbol)
+    payload = _attach_combo_signal(payload)
     payload = _with_chart_debug(payload, cfg)
     return jsonify(payload)
 
@@ -561,6 +748,7 @@ def chart_data():
     payload['slot'] = slot
     payload['symbol'] = symbol
     payload['markers'] = _markers_for_symbol(symbol)
+    payload = _attach_combo_signal(payload)
     payload = _with_chart_debug(payload, cfg)
     return jsonify(payload)
 
@@ -573,6 +761,7 @@ def api_candles():
     cfg = load_config()
     payload = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
     payload['markers'] = _markers_for_symbol(symbol)
+    payload = _attach_combo_signal(payload)
     payload = _with_chart_debug(payload, cfg)
     return jsonify(payload)
 

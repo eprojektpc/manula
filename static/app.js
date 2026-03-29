@@ -88,6 +88,7 @@ function slotCardHtml(slot) {
     <div class="slot-flash" data-role="slotFlash"></div>
 
     <div class="slot-indicators" data-role="slot-indicators">
+      <div class="pill combo-pill combo-none" data-role="comboSignal">Combo: brak danych historycznych</div>
       <div class="pill">RSI: <span data-role="rsiValue">-</span></div>
       <div class="pill">Fuel: <span data-role="fuelIcons"></span> <span data-role="fuelText">-</span></div>
       <div class="pill">Pattern: <span data-role="patternAlert">-</span></div>
@@ -285,6 +286,15 @@ function updateSlotPanel(slotData) {
   setText(card, 'slotScanSymbol', slotScan?.symbol || '-');
 }
 
+function setComboSignal(card, comboSignal) {
+  const el = card.querySelector('[data-role="comboSignal"]');
+  if (!el) return;
+  const msg = comboSignal?.message || 'Combo: brak danych historycznych';
+  const level = comboSignal?.level || 'none';
+  el.textContent = msg;
+  el.className = `pill combo-pill combo-${level}`;
+}
+
 async function saveSlotConfig(slotId, card) {
   const payload = {
     symbol: card.querySelector('[data-field="symbol"]').value,
@@ -432,6 +442,7 @@ async function refreshSlotChart(slotId, fit = false, force = false) {
     setText(card, 'fuelText', data.fuel?.text || '-');
     setText(card, 'patternAlert', data.pattern?.name ? `${data.pattern.name} · ${data.pattern.message}` : 'Brak wzorca');
     setText(card, 'currentPrice', fmt(data.current_price, 6));
+    setComboSignal(card, data.combo_signal);
 
     setText(card, 'debugLastUpdate', data.debug?.last_update_time);
     setText(card, 'debugServerTime', data.debug?.server_time);
