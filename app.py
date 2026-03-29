@@ -474,6 +474,7 @@ def api_slot_config(slot: int):
     budget = parse_optional_float(data.get('budget'), 'budget')
     tp_pct = parse_optional_float(data.get('tp_pct'), 'tp_pct')
     sl_pct = parse_optional_float(data.get('sl_pct'), 'sl_pct')
+    now_iso = utc_now_iso()
 
     storage.upsert_slot_setting(
         slot=slot,
@@ -482,8 +483,15 @@ def api_slot_config(slot: int):
         budget=budget,
         tp_pct=tp_pct,
         sl_pct=sl_pct,
-        updated_at=utc_now_iso(),
+        updated_at=now_iso,
     )
+
+    setting = _slot_settings_map().get(slot, {})
+    if bool(setting.get('auto_enabled')):
+        effective_tp = tp_pct if tp_pct is not None else setting.get('tp_pct')
+        effective_sl = sl_pct if sl_pct is not None else setting.get('sl_pct')
+        if effective_tp is not None and effective_sl is not None:
+            storage.update_open_position_risk(slot=slot, tp_pct=float(effective_tp), sl_pct=float(effective_sl), updated_at=now_iso)
     return jsonify({'ok': True, 'slot': slot})
 
 

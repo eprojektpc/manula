@@ -369,7 +369,7 @@ function wireSlotCard(card, slot) {
   card.querySelector('[data-field="auto_enabled"]').addEventListener('change', async () => {
     try {
       await saveSlotConfig(slotId, card);
-      showSlotFlash(slotId, `Auto mode dla slotu ${slotId} zapisany (TP/SL bez zmian).`);
+      showSlotFlash(slotId, `Auto mode dla slotu ${slotId} zapisany. TP/SL możesz ustawiać per slot.`);
       await loadState();
     } catch (e) {
       showSlotFlash(slotId, e.message, true);
