@@ -177,23 +177,29 @@ class PositionMonitor(threading.Thread):
     def run(self) -> None:
         while not self.stop_event.is_set():
             cfg = load_config()
+            slot_settings = _slot_settings_map()
             positions = storage.get_open_positions()
             for pos in positions:
                 try:
+                    slot = int(pos['slot'])
+                    setting = slot_settings.get(slot, {})
+                    if not bool(setting.get('auto_enabled')):
+                        continue
+
                     price = float(get_price(pos['symbol']) or 0.0)
                     if price <= 0:
                         continue
                     entry_price = float(pos['entry_price'])
                     pnl_pct = ((price - entry_price) / entry_price) * 100.0
                     pnl_value = (price - entry_price) * float(pos['quantity'])
-                    storage.update_position_metrics(int(pos['slot']), price, pnl_pct, pnl_value, utc_now_iso())
+                    storage.update_position_metrics(slot, price, pnl_pct, pnl_value, utc_now_iso())
 
-                    tp_price = float(pos.get('tp_price') or 0.0)
-                    sl_price = float(pos.get('sl_price') or 0.0)
-                    if tp_price > 0 and price >= tp_price:
-                        execute_sell(slot=int(pos['slot']), reason='AUTO_TP')
-                    elif sl_price > 0 and price <= sl_price:
-                        execute_sell(slot=int(pos['slot']), reason='AUTO_SL')
+                    tp_pct = float(pos.get('tp_pct') or 0.0)
+                    sl_pct = float(pos.get('sl_pct') or 0.0)
+                    if tp_pct > 0 and pnl_pct >= tp_pct:
+                        execute_sell(slot=slot, reason='AUTO_TP')
+                    elif sl_pct > 0 and pnl_pct <= (-sl_pct):
+                        execute_sell(slot=slot, reason='AUTO_SL')
                 except Exception:
                     continue
             time.sleep(max(1, int(cfg['trading']['monitor_interval_sec'])))
