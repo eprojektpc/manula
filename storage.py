@@ -225,6 +225,36 @@ def update_position_metrics(slot: int, current_price: float, pnl_pct: float, pnl
     conn.close()
 
 
+def update_open_position_risk(slot: int, tp_pct: float, sl_pct: float, updated_at: str) -> None:
+    conn = connect()
+    row = conn.execute(
+        'SELECT entry_price FROM positions WHERE slot=? AND status="OPEN"',
+        (int(slot),),
+    ).fetchone()
+    if not row:
+        conn.close()
+        return
+
+    entry_price = float(row['entry_price'] or 0.0)
+    tp_price = entry_price * (1 + float(tp_pct) / 100.0) if entry_price > 0 else None
+    sl_price = entry_price * (1 - float(sl_pct) / 100.0) if entry_price > 0 else None
+
+    conn.execute(
+        '''
+        UPDATE positions
+           SET tp_pct=?,
+               sl_pct=?,
+               tp_price=?,
+               sl_price=?,
+               updated_at=?
+         WHERE slot=? AND status="OPEN"
+        ''',
+        (float(tp_pct), float(sl_pct), tp_price, sl_price, updated_at, int(slot)),
+    )
+    conn.commit()
+    conn.close()
+
+
 def close_position(slot: int, updated_at: str, reason: str | None = None) -> None:
     conn = connect()
     conn.execute('UPDATE positions SET status="CLOSED", close_reason=?, updated_at=? WHERE slot=? AND status="OPEN"', (reason, updated_at, slot))
