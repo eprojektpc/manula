@@ -380,11 +380,28 @@ def _slots_payload() -> list[dict[str, Any]]:
     for slot in range(1, slot_count + 1):
         pos = open_map.get(slot)
         setting = settings.get(slot, {})
+        slot_scan = storage.get_slot_scan_result(slot) or {}
+        saved_symbol = str(setting.get('symbol') or '').upper().strip()
+        pos_symbol = str((pos or {}).get('symbol') or '').upper().strip()
+        scanned_symbol = str(slot_scan.get('symbol') or '').upper().strip()
+        auto_enabled = bool(setting.get('auto_enabled'))
+
+        if saved_symbol:
+            slot_symbol = saved_symbol
+        elif pos_symbol:
+            slot_symbol = pos_symbol
+        elif auto_enabled and scanned_symbol:
+            # Dla slotu w trybie auto trzymaj ostatni symbol ze skanu slotu
+            # (nawet po wylogowaniu/zalogowaniu), dopóki auto nie wybierze nowego.
+            slot_symbol = scanned_symbol
+        else:
+            slot_symbol = default_symbol()
+
         realized = storage.slot_realized_pnl(slot)
         base = {
             'slot': slot,
-            'symbol': setting.get('symbol') or (pos or {}).get('symbol') or default_symbol(),
-            'auto_enabled': bool(setting.get('auto_enabled')),
+            'symbol': slot_symbol,
+            'auto_enabled': auto_enabled,
             'config_budget': setting.get('budget'),
             'config_tp_pct': setting.get('tp_pct'),
             'config_sl_pct': setting.get('sl_pct'),
