@@ -112,8 +112,6 @@ def combo_from_features(feat: ComboFeatures, cfg: dict[str, Any] | None = None) 
         combo_tokens.append('RSIN')
     elif feat.rsi > 60:
         combo_tokens.append('RSIH')
-    else:
-        combo_tokens.append('RSI0')
 
     # === MACD ===
     combo_tokens.append('MACDup' if feat.macd_hist_last >= feat.macd_hist_prev else 'MACDdn')
@@ -125,7 +123,9 @@ def combo_from_features(feat: ComboFeatures, cfg: dict[str, Any] | None = None) 
     if abs(feat.change_3m_pct) > 2.0:
         combo_tokens.append('REV')
 
-    return '|'.join(combo_tokens)
+    combo_key = '|'.join(combo_tokens)
+    print(f'[SCREENER_DEBUG] generated combo_key={combo_key}')
+    return combo_key
 
 
 def _get_json(path: str, params: dict[str, Any] | None = None, timeout: int = 15):
