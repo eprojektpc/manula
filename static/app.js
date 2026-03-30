@@ -384,12 +384,22 @@ function wireSlotCard(card, slot) {
     showSlotFlash(slotId, `Skan combo slotu ${slotId} w toku...`);
 
     try {
-      const result = await apiPost('/api/scan_combo_for_slot', {
-        slot_id: slotId,
-        min_combo_rate: minComboRate,
-        min_sample: minSample,
-        interval,
+      const response = await fetch('/api/scan_combo_for_slot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot_id: slotId,
+          min_combo_rate: minComboRate / 100,
+          min_sample: minSample,
+          interval,
+        }),
       });
+      if (response.status === 401) {
+        window.location.href = '/login';
+        throw new Error('Brak sesji');
+      }
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Błąd API');
       const symbolInput = card.querySelector('[data-field="symbol"]');
       symbolInput.value = result.symbol;
       await loadState();

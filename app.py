@@ -1021,38 +1021,45 @@ def api_slot_scan(slot: int):
 
 @app.route('/api/scan_combo_for_slot', methods=['POST'])
 @login_required
-def api_scan_combo_for_slot():
-    data = request.get_json(force=True, silent=True) or {}
-    cfg = load_config()
-    slot_count = int(cfg['trading']['slot_count'])
-    slot = int(data.get('slot_id') or 0)
-    if slot < 1 or slot > slot_count:
-        raise ValueError(f'Nieprawidłowy slot. Użyj 1..{slot_count}.')
+def scan_combo_for_slot():
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        cfg = load_config()
+        slot_count = int(cfg['trading']['slot_count'])
+        slot = int(data.get('slot_id') or 0)
+        if slot < 1 or slot > slot_count:
+            raise ValueError(f'Nieprawidłowy slot. Użyj 1..{slot_count}.')
 
-    min_combo_rate_input = parse_optional_float(data.get('min_combo_rate'), 'min_combo_rate')
-    min_combo_rate = float(min_combo_rate_input if min_combo_rate_input is not None else 0.5)
-    if min_combo_rate > 1.0:
-        min_combo_rate /= 100.0
-    if min_combo_rate < 0 or min_combo_rate > 1:
-        raise ValueError('min_combo_rate musi być z zakresu 0..1 lub 0..100%.')
+        min_combo_rate_input = parse_optional_float(data.get('min_combo_rate'), 'min_combo_rate')
+        min_combo_rate = float(min_combo_rate_input if min_combo_rate_input is not None else 0.5)
+        if min_combo_rate > 1.0:
+            min_combo_rate /= 100.0
+        if min_combo_rate < 0 or min_combo_rate > 1:
+            raise ValueError('min_combo_rate musi być z zakresu 0..1 lub 0..100%.')
 
-    min_sample_input = parse_optional_float(data.get('min_sample'), 'min_sample')
-    min_sample = int(min_sample_input) if min_sample_input is not None else None
-    if min_sample is not None and min_sample < 0:
-        raise ValueError('min_sample nie może być ujemne.')
+        min_sample_input = parse_optional_float(data.get('min_sample'), 'min_sample')
+        min_sample = int(min_sample_input) if min_sample_input is not None else None
+        if min_sample is not None and min_sample < 0:
+            raise ValueError('min_sample nie może być ujemne.')
 
-    interval = str(data.get('interval') or '1m').strip() or '1m'
+        interval = str(data.get('interval') or '1m').strip() or '1m'
+        print('COMBO API CALLED', slot, min_combo_rate, min_sample)
 
-    with _SCAN_LOCK:
-        result = _scan_best_symbol_by_combo(
-            slot=slot,
-            min_combo_rate=min_combo_rate,
-            min_sample=min_sample,
-            interval=interval,
-        )
+        with _SCAN_LOCK:
+            result = _scan_best_symbol_by_combo(
+                slot=slot,
+                min_combo_rate=min_combo_rate,
+                min_sample=min_sample,
+                interval=interval,
+            )
 
-    http_code = 200 if result.get('ok') else 404
-    return jsonify(result), http_code
+        http_code = 200 if result.get('ok') else 404
+        result['success'] = bool(result.get('ok'))
+        result['slot_id'] = slot
+        return jsonify(result), http_code
+    except Exception as exc:
+        code = 400 if isinstance(exc, ValueError) else 500
+        return jsonify({'success': False, 'ok': False, 'error': str(exc)}), code
 
 
 @app.route('/api/buy', methods=['POST'])
