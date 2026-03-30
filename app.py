@@ -27,9 +27,6 @@ storage.init_db()
 _SCAN_LOCK = threading.Lock()
 _SELL_LOCK = threading.Lock()
 _COMBO_DB_PATH = '/root/screener-bot/screener.db'
-_COMBO_CACHE_TTL_SEC = 30.0
-_COMBO_CACHE_LOCK = threading.Lock()
-_COMBO_CACHE: dict[str, Any] = {'expires_at': 0.0, 'table': None, 'column_map': None}
 _SCAN_COMBO_TOKEN = os.environ.get('SCAN_COMBO_TOKEN', 'tajnytoken123')
 
 
@@ -392,88 +389,17 @@ def _build_combo_key(payload: dict[str, Any]) -> str:
     return f'pattern={pattern_name}|fuel={_fuel_bucket(fuel_score)}|rsi={_rsi_bucket(rsi_value)}'
 
 
-def _pick_existing_column(cols: list[str], candidates: list[str]) -> str | None:
-    cols_set = {c.lower() for c in cols}
-    for item in candidates:
-        if item.lower() in cols_set:
-            return item
-    return None
-
-
-def _combo_table_info() -> tuple[str, dict[str, str]] | tuple[None, None]:
-    now = time.time()
-    with _COMBO_CACHE_LOCK:
-        if _COMBO_CACHE['expires_at'] > now:
-            return _COMBO_CACHE['table'], _COMBO_CACHE['column_map']
-
+def _fetch_combo_stats_from_recommendations(combo_key: str) -> dict[str, Any] | None:
     if not os.path.exists(_COMBO_DB_PATH):
-        with _COMBO_CACHE_LOCK:
-            _COMBO_CACHE.update({'expires_at': now + _COMBO_CACHE_TTL_SEC, 'table': None, 'column_map': None})
-        return None, None
-
-    table: str | None = None
-    column_map: dict[str, str] | None = None
-    try:
-        with sqlite3.connect(_COMBO_DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-            candidate_tables = [str(r['name']) for r in rows]
-            score_rows: list[tuple[int, str, dict[str, str]]] = []
-            for tbl in candidate_tables:
-                cols = [str(r['name']) for r in conn.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
-                combo_col = _pick_existing_column(cols, ['combo_key', 'combo', 'combo_id', 'key'])
-                if not combo_col:
-                    continue
-                col_map = {
-                    'combo_key': combo_col,
-                    'hit_tp_rate': _pick_existing_column(cols, ['hit_tp_rate', 'tp_rate', 'success_rate', 'win_rate']),
-                    'hits_tp': _pick_existing_column(cols, ['hits_tp', 'tp_hits', 'tp_count', 'wins']),
-                    'avg_max_profit': _pick_existing_column(cols, ['avg_max_profit', 'avg_profit', 'mean_max_profit']),
-                    'wilson': _pick_existing_column(cols, ['wilson', 'wilson_score', 'wilson_lb']),
-                    'n': _pick_existing_column(cols, ['n', 'trials', 'sample_size', 'count']),
-                    'last_ts': _pick_existing_column(cols, ['last_ts', 'updated_at', 'last_seen', 'ts']),
-                }
-                score = sum(1 for key in ['hit_tp_rate', 'hits_tp', 'avg_max_profit', 'wilson', 'n', 'last_ts'] if col_map.get(key))
-                name_bonus = 2 if any(x in tbl.lower() for x in ('combo', 'outcome', 'recommend')) else 0
-                score_rows.append((score + name_bonus, tbl, col_map))
-
-            if score_rows:
-                score_rows.sort(key=lambda x: x[0], reverse=True)
-                _, table, column_map = score_rows[0]
-    except Exception:
-        table, column_map = None, None
-
-    with _COMBO_CACHE_LOCK:
-        _COMBO_CACHE.update({'expires_at': now + _COMBO_CACHE_TTL_SEC, 'table': table, 'column_map': column_map})
-    return table, column_map
-
-
-def _fetch_combo_stats(combo_key: str) -> dict[str, Any] | None:
-    table, column_map = _combo_table_info()
-    if not table or not column_map:
         return None
 
-    combo_col = column_map.get('combo_key')
-    if not combo_col:
-        return None
-
-    wanted = ['combo_key', 'hit_tp_rate', 'hits_tp', 'avg_max_profit', 'wilson', 'n', 'last_ts']
-    select_parts: list[str] = []
-    for key in wanted:
-        col = column_map.get(key)
-        if col:
-            select_parts.append(f'"{col}" AS "{key}"')
-        elif key == 'combo_key':
-            select_parts.append(f'"{combo_col}" AS "combo_key"')
-        else:
-            select_parts.append(f'NULL AS "{key}"')
-
-    query = f'''
-        SELECT {", ".join(select_parts)}
-        FROM "{table}"
-        WHERE "{combo_col}" = ?
-        ORDER BY COALESCE("last_ts", 0) DESC
-        LIMIT 1
+    query = '''
+        SELECT
+            COUNT(*) as n,
+            SUM(hit) as hits,
+            AVG(max_profit_30m) as avg_max_profit
+        FROM recommendations
+        WHERE combo_key = ?
     '''
     try:
         with sqlite3.connect(_COMBO_DB_PATH) as conn:
@@ -481,7 +407,24 @@ def _fetch_combo_stats(combo_key: str) -> dict[str, Any] | None:
             row = conn.execute(query, (combo_key,)).fetchone()
             if not row:
                 return None
-            return {key: row[key] for key in wanted}
+
+            n = int(row['n'] or 0)
+            if n == 0:
+                return None
+
+            hits = int(row['hits'] or 0)
+            hit_tp_rate = hits / n
+            avg_max_profit = float(row['avg_max_profit']) if row['avg_max_profit'] is not None else None
+
+            print(f'[combo] key={combo_key} n={n} hit_rate={hit_tp_rate}')
+            return {
+                'n': n,
+                'hit_tp_rate': hit_tp_rate,
+                'avg_max_profit': avg_max_profit,
+                'wilson': hit_tp_rate,
+                'hits_tp': hits,
+                'last_ts': None,
+            }
     except Exception:
         return None
 
@@ -528,7 +471,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
             continue
 
         combo_key = _build_combo_key(chart)
-        combo_stats = _fetch_combo_stats(combo_key)
+        combo_stats = _fetch_combo_stats_from_recommendations(combo_key)
         if not combo_stats:
             continue
         combo_rows_found += 1
@@ -660,7 +603,7 @@ def _combo_message_and_level(combo: dict[str, Any] | None) -> tuple[str, str]:
 
 def _attach_combo_signal(payload: dict[str, Any]) -> dict[str, Any]:
     combo_key = _build_combo_key(payload)
-    combo_stats = _fetch_combo_stats(combo_key)
+    combo_stats = _fetch_combo_stats_from_recommendations(combo_key)
     message, level = _combo_message_and_level(combo_stats)
 
     payload['combo_signal'] = {
