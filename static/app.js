@@ -83,6 +83,15 @@ function slotCardHtml(slot) {
     <div class="button-row slot-actions utility-actions">
       <button data-action="save">Zapisz slot</button>
       <button data-action="scan">Skanuj slot ${slot.slot}</button>
+      <label class="combo-filter">
+        Min combo %
+        <input data-field="min_combo_rate" type="number" min="0" max="100" step="1" value="50">
+      </label>
+      <label class="combo-filter">
+        Min próba
+        <input data-field="min_sample" type="number" min="0" step="1" placeholder="np. 10">
+      </label>
+      <button data-action="scan-combo">Szukaj przez combo</button>
       <button data-action="refresh-chart">Odśwież wykres</button>
     </div>
     <div class="slot-flash" data-role="slotFlash"></div>
@@ -359,6 +368,43 @@ function wireSlotCard(card, slot) {
       showSlotFlash(slotId, `Skan slotu ${slotId} zakończony. Wybrano ${result.symbol}.`);
     } catch (e) {
       showSlotFlash(slotId, e.message, true);
+    }
+  });
+
+  card.querySelector('[data-action="scan-combo"]').addEventListener('click', async () => {
+    const btn = card.querySelector('[data-action="scan-combo"]');
+    const minComboRate = Number(card.querySelector('[data-field="min_combo_rate"]').value || 50);
+    const minSampleRaw = card.querySelector('[data-field="min_sample"]').value;
+    const minSample = minSampleRaw === '' ? null : Number(minSampleRaw);
+    const interval = card.querySelector('[data-field="interval"]').value || '1m';
+
+    btn.disabled = true;
+    const prevLabel = btn.textContent;
+    btn.textContent = 'Szukam...';
+    showSlotFlash(slotId, `Skan combo slotu ${slotId} w toku...`);
+
+    try {
+      const result = await apiPost('/api/scan_combo_for_slot', {
+        slot_id: slotId,
+        min_combo_rate: minComboRate,
+        min_sample: minSample,
+        interval,
+      });
+      const symbolInput = card.querySelector('[data-field="symbol"]');
+      symbolInput.value = result.symbol;
+      await loadState();
+      await refreshSlotChart(slotId, true, true);
+      const rateRaw = Number(result.hit_tp_rate || 0);
+      const ratePct = rateRaw <= 1 ? rateRaw * 100 : rateRaw;
+      showSlotFlash(
+        slotId,
+        `${result.message} combo=${result.combo_key} · TP ${fmt(ratePct, 1)}% · n=${result.n ?? '-'} · wilson=${fmt(result.wilson, 2)}`,
+      );
+    } catch (e) {
+      showSlotFlash(slotId, e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prevLabel;
     }
   });
 

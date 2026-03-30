@@ -31,6 +31,13 @@ button.danger { background: #8a1f1f; }
 .slot-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
 .checkbox-inline { flex-direction: row; align-items: center; gap: 8px; align-self: end; }
 .slot-actions { margin-top: 6px; margin-bottom: 8px; }
+.combo-filter {
+  min-width: 130px;
+  flex: 1 1 150px;
+}
+.combo-filter input {
+  width: 100%;
+}
 .trade-actions button { font-weight: 700; min-height: 46px; }
 .chart-trade-actions { margin-top: 0; margin-bottom: 8px; }
 .slot-indicators { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -105,6 +112,7 @@ th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 8px 5p
   .slot-card { width: 100%; }
   .slot-form-grid { grid-template-columns: 1fr; }
   .slot-actions { display: grid; grid-template-columns: 1fr; }
+  .combo-filter { width: 100%; }
   .trade-actions { grid-template-columns: 1fr 1fr; }
   .trade-actions button,
   .utility-actions button { width: 100%; }
