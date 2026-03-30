@@ -470,7 +470,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         except Exception:
             continue
 
-        combo_key = _build_combo_key(chart)
+        combo_key = row.get('combo_key') or _build_combo_key(chart)
         combo_stats = _fetch_combo_stats_from_recommendations(combo_key)
         if not combo_stats:
             continue
