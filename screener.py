@@ -45,7 +45,7 @@ class Candidate:
             'range_position': round(self.range_position, 4),
             'trend': self.trend,
             'note': self.note,
-            'combo_key': self.combo_key,
+            'combo_key': str(self.combo_key or '').strip(),
         }
 
 
@@ -95,7 +95,7 @@ def combo_from_features(feat: ComboFeatures, cfg: dict[str, Any] | None = None) 
     combo_tokens: list[str] = []
     if feat.prev_close < feat.prev_open and feat.curr_close > feat.curr_open:
         combo_tokens.append('R1+G')
-    combo_tokens.append('G' if feat.curr_close >= feat.curr_open else 'R')
+        combo_tokens.append('G')
     combo_tokens.append('!D' if feat.change_3m_pct > -1.0 else 'D')
     if 25.0 <= feat.rsi <= 65.0:
         combo_tokens.append('RSIN')
@@ -105,7 +105,7 @@ def combo_from_features(feat: ComboFeatures, cfg: dict[str, Any] | None = None) 
         combo_tokens.append('RSIH')
     combo_tokens.append('MACDup' if feat.macd_hist_last >= feat.macd_hist_prev else 'MACDdn')
     combo_tokens.append('SMAabv' if feat.close >= feat.sma20 else 'SMAbel')
-    return '|'.join(combo_tokens)
+    return '|'.join(token for token in combo_tokens if token)
 
 
 def _get_json(path: str, params: dict[str, Any] | None = None, timeout: int = 15):
