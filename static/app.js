@@ -6,6 +6,7 @@ let slotChartsResizeObserver = null;
 let stateRefreshTimer = null;
 let chartPollingTimer = null;
 let loadStateRequestSeq = 0;
+const token = new URLSearchParams(window.location.search).get('token');
 
 const INTERVALS = ['1m', '3m', '5m', '15m', '1h'];
 const $ = (id) => document.getElementById(id);
@@ -384,7 +385,8 @@ function wireSlotCard(card, slot) {
     showSlotFlash(slotId, `Skan combo slotu ${slotId} w toku...`);
 
     try {
-      const response = await fetch('/api/scan_combo_for_slot', {
+      const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
+      const response = await fetch(`/api/scan_combo_for_slot${tokenQuery}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
