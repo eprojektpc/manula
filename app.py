@@ -433,6 +433,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         if not symbol:
             continue
 
+        print(f'[COMBO_SCAN] raw candidate combo_key={row.get("combo_key")} symbol={symbol}')
         combo_key = str(row.get('combo_key') or '').strip()
         if not combo_key:
             print(f'[COMBO_SCAN] symbol={symbol} combo_key=EMPTY (skipping)')
@@ -473,6 +474,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
             'slot': slot,
             'scan_time': scan_time,
             'message': 'Brak par spełniających warunki combo.',
+            'combo_key': '',
             'min_combo_rate': min_combo_rate,
             'min_sample': min_sample,
             'combo_rows_found': combo_rows_found,
