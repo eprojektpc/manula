@@ -335,6 +335,9 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any], knife_cfg: dict[str, Any]) 
     )
     combo_key = combo_from_features(feat, cfg)
     print(f'[SCREENER_DEBUG] {symbol} generated combo_key={combo_key}')
+    if not combo_key:
+        print(f'[SCREENER_DEBUG] {symbol} generated empty combo_key (skipping)')
+        return None
 
     effective_rsi_max = 40.0
     effective_min_vol_ratio = min(float(cfg.get('min_vol_ratio', 0.0)), 0.30)
@@ -411,8 +414,6 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     if not top_symbols:
         raise ScreenerError('Brak par spełniających minimalną płynność.')
 
-    ticker_price_map = {str(row.get('symbol', '')): float(row.get('lastPrice') or 0.0) for row in tickers if row.get('symbol')}
-
     candidates: list[Candidate] = []
     workers = max(1, int(scanner.get('workers', 8)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -429,27 +430,9 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     target_pairs = min(10, max(3, int(scanner.get('top_pairs', 5))))
     selected = []
     for c in candidates[:target_pairs]:
-        selected.append(c.as_dict())
-
-    if len(selected) < target_pairs:
-        selected_symbols_set = {str(c.get('symbol')) for c in selected}
-        missing = target_pairs - len(selected)
-        fallback_symbols = [sym for sym in top_symbols if sym not in selected_symbols_set][:missing]
-        for sym in fallback_symbols:
-            selected.append({
-                'symbol': sym,
-                'score': 0.0,
-                'price': round(ticker_price_map.get(sym, 0.0), 8),
-                'breakout_gap_pct': 0.0,
-                'rsi': 50.0,
-                'vol_ratio': 0.0,
-                'change_3m_pct': 0.0,
-                'atr_pct': 0.0,
-                'range_position': 0.0,
-                'trend': 'MIX',
-                'note': 'fallback_liquidity_candidate',
-                'combo_key': None,
-            })
+        row = c.as_dict()
+        print(f'[SCREENER_DEBUG] candidate row before selection: {row}')
+        selected.append(row)
     return selected
 
 
