@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
+import traceback
 from typing import Any
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -387,14 +388,13 @@ def _fetch_combo_stats_from_recommendations(combo_key: str) -> dict[str, Any] | 
             hit_tp_rate = hits / n
             avg_max_profit = float(row['avg_max_profit']) if row['avg_max_profit'] is not None else None
 
-            print(f'[COMBO_STATS] n={n}, hit_rate={hit_tp_rate}')
+            print(f'[COMBO_STATS] combo_key={combo_key} n={n} hit_tp_rate={hit_tp_rate:.4f} avg_max_profit={avg_max_profit}')
             return {
                 'n': n,
                 'hit_tp_rate': hit_tp_rate,
                 'avg_max_profit': avg_max_profit,
                 'wilson': hit_tp_rate,
                 'hits_tp': hits,
-                'last_ts': None,
             }
     except Exception:
         return None
@@ -439,7 +439,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         if not combo_key:
             continue
 
-        print(f'[COMBO] {symbol} → {combo_key}')
+        print(f'[COMBO_SCAN] symbol={symbol} combo_key={combo_key}')
         combo_stats = _fetch_combo_stats_from_recommendations(combo_key)
         if not combo_stats:
             continue
@@ -447,6 +447,10 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
 
         hit_rate_fraction = _normalize_rate_to_fraction(combo_stats.get('hit_tp_rate'))
         sample_size = int(float(combo_stats.get('n') or 0))
+        print(
+            f'[COMBO_SCAN] stats symbol={symbol} n={sample_size} '
+            f'hit_tp_rate={hit_rate_fraction:.4f} avg_max_profit={combo_stats.get("avg_max_profit")}'
+        )
         if hit_rate_fraction < min_combo_rate:
             continue
         if min_sample is not None and sample_size < int(min_sample):
@@ -460,7 +464,6 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
             'avg_max_profit': combo_stats.get('avg_max_profit'),
             'wilson': combo_stats.get('wilson'),
             'n': combo_stats.get('n'),
-            'last_ts': combo_stats.get('last_ts'),
             'scan_row': row,
             'scan_time': scan_time,
         }
@@ -480,7 +483,16 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         }
 
     symbol = str(selected['symbol'])
-    storage.upsert_slot_setting(slot, scan_time, symbol=symbol)
+    print(f'[COMBO_SCAN] final selected symbol={symbol} combo_key={selected.get("combo_key")}')
+    storage.upsert_slot_setting(
+        slot=slot,
+        symbol=symbol,
+        budget=slot_cfg.get('budget'),
+        tp_pct=slot_cfg.get('tp_pct'),
+        sl_pct=slot_cfg.get('sl_pct'),
+        auto_enabled=slot_cfg.get('auto_enabled'),
+        updated_at=scan_time,
+    )
 
     storage.save_slot_scan_result(
         slot,
@@ -510,7 +522,6 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         'wilson': selected.get('wilson'),
         'n': selected.get('n'),
         'avg_max_profit': selected.get('avg_max_profit'),
-        'last_ts': selected.get('last_ts'),
         'scan_time': scan_time,
         'message': f'Wybrano {symbol} na podstawie combo.',
         'combo_rows_found': combo_rows_found,
@@ -576,7 +587,6 @@ def _attach_combo_signal(payload: dict[str, Any]) -> dict[str, Any]:
         'avg_max_profit': combo_stats.get('avg_max_profit') if combo_stats else None,
         'wilson': combo_stats.get('wilson') if combo_stats else None,
         'n': combo_stats.get('n') if combo_stats else None,
-        'last_ts': combo_stats.get('last_ts') if combo_stats else None,
         'db_path': _COMBO_DB_PATH,
     }
     return payload
@@ -976,6 +986,8 @@ def scan_combo_for_slot():
         return jsonify(result), http_code
     except Exception as exc:
         code = 400 if isinstance(exc, ValueError) else 500
+        print('[scan_combo_for_slot] exception:')
+        print(traceback.format_exc())
         return jsonify({'success': False, 'ok': False, 'error': str(exc)}), code
 
 

@@ -231,6 +231,7 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any], knife_cfg: dict[str, Any]) 
     ema7 = close.ewm(span=7, adjust=False).mean()
     ema25 = close.ewm(span=25, adjust=False).mean()
     ema99 = close.ewm(span=99, adjust=False).mean()
+    sma20 = close.rolling(20).mean()
     rsi = compute_rsi(close)
     macd_hist = compute_macd_hist(close)
     atr_pct = compute_atr_pct(df)
@@ -252,8 +253,30 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any], knife_cfg: dict[str, Any]) 
     vol_ratio = float(volume.iloc[-1] / max(volume.iloc[-21:-1].mean(), 1e-12))
     change_1m_pct = float(close.pct_change(1).iloc[-1] * 100)
     change_3m_pct = float((last_close / close.iloc[-4] - 1) * 100)
+    prev_open = float(df['open'].iloc[-2])
+    prev_close = float(close.iloc[-2])
+    curr_open = float(df['open'].iloc[-1])
+    curr_close = float(close.iloc[-1])
     ema_spread_pct = float(((ema7.iloc[-1] - ema25.iloc[-1]) / last_close) * 100) if last_close else 0.0
     trend = 'UP' if ema7.iloc[-1] > ema25.iloc[-1] > ema99.iloc[-1] and last_close > ema7.iloc[-1] else 'MIX'
+
+    combo_tokens: list[str] = []
+    if prev_close < prev_open and curr_close > curr_open:
+        combo_tokens.append('R1+G')
+    combo_tokens.append('G' if curr_close >= curr_open else 'R')
+    combo_tokens.append('!D' if change_3m_pct > -1.0 else 'D')
+    if 25.0 <= last_rsi <= 65.0:
+        combo_tokens.append('RSIN')
+    elif last_rsi < 25.0:
+        combo_tokens.append('RSIL')
+    else:
+        combo_tokens.append('RSIH')
+    macd_prev = float(macd_hist.iloc[-2]) if len(macd_hist) > 1 else last_macd_hist
+    combo_tokens.append('MACDup' if last_macd_hist >= macd_prev else 'MACDdn')
+    last_sma20 = float(sma20.iloc[-1]) if pd.notna(sma20.iloc[-1]) else last_close
+    combo_tokens.append('SMAabv' if last_close >= last_sma20 else 'SMAbel')
+    combo_key = '|'.join(combo_tokens)
+    print(f'[SCREENER_DEBUG] {symbol} generated combo_key={combo_key}')
 
     effective_rsi_max = 40.0
     effective_min_vol_ratio = min(float(cfg.get('min_vol_ratio', 0.0)), 0.30)
@@ -298,6 +321,7 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any], knife_cfg: dict[str, Any]) 
         range_position=range_position,
         trend=trend,
         note=note,
+        combo_key=combo_key,
     )
 
 
@@ -310,25 +334,22 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     allowed_symbols = set(fetch_symbols(quote_asset))
     effective_min_quote_volume = min(float(scanner.get('min_quote_volume', 0.0)), 100000.0)
 
-    prefilter_rows: list[tuple[str, float, str | None]] = []
+    prefilter_rows: list[tuple[str, float]] = []
     for row in tickers:
         symbol = str(row.get('symbol', ''))
         if symbol not in allowed_symbols or symbol in blacklist:
             continue
         quote_volume = float(row.get('quoteVolume') or 0.0)
-        combo_key = row.get('combo_key')
-        combo_key_value = str(combo_key).strip() if combo_key is not None else None
-        prefilter_rows.append((symbol, quote_volume, combo_key_value))
+        prefilter_rows.append((symbol, quote_volume))
 
-    universe: list[tuple[str, float, str | None]] = [(symbol, qv, combo_key) for symbol, qv, combo_key in prefilter_rows if qv >= effective_min_quote_volume]
+    universe: list[tuple[str, float]] = [(symbol, qv) for symbol, qv in prefilter_rows if qv >= effective_min_quote_volume]
     if not universe and prefilter_rows:
         universe = prefilter_rows[: min(20, len(prefilter_rows))]
 
     top_limit = max(20, int(scanner.get('top_volume_limit', 50)))
     universe.sort(key=lambda x: x[1], reverse=True)
     top_entries = universe[:top_limit]
-    top_symbols = [sym for sym, _, _ in top_entries]
-    combo_map = {sym: combo_key for sym, _, combo_key in top_entries}
+    top_symbols = [sym for sym, _ in top_entries]
     if not top_symbols:
         raise ScreenerError('Brak par spełniających minimalną płynność.')
 
@@ -350,10 +371,7 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     target_pairs = min(10, max(3, int(scanner.get('top_pairs', 5))))
     selected = []
     for c in candidates[:target_pairs]:
-        row = c.as_dict()
-        if row.get('combo_key') is None:
-            row['combo_key'] = combo_map.get(c.symbol)
-        selected.append(row)
+        selected.append(c.as_dict())
 
     if len(selected) < target_pairs:
         selected_symbols_set = {str(c.get('symbol')) for c in selected}
@@ -372,7 +390,7 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
                 'range_position': 0.0,
                 'trend': 'MIX',
                 'note': 'fallback_liquidity_candidate',
-                'combo_key': combo_map.get(sym),
+                'combo_key': None,
             })
     return selected
 
