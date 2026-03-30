@@ -49,6 +49,65 @@ class Candidate:
         }
 
 
+@dataclass
+class ComboFeatures:
+    prev_open: float
+    prev_close: float
+    curr_open: float
+    curr_close: float
+    change_3m_pct: float
+    rsi: float
+    macd_hist_last: float
+    macd_hist_prev: float
+    close: float
+    sma20: float
+
+
+def build_combo_features(
+    *,
+    prev_open: float,
+    prev_close: float,
+    curr_open: float,
+    curr_close: float,
+    change_3m_pct: float,
+    rsi: float,
+    macd_hist_last: float,
+    macd_hist_prev: float,
+    close: float,
+    sma20: float,
+) -> ComboFeatures:
+    return ComboFeatures(
+        prev_open=float(prev_open),
+        prev_close=float(prev_close),
+        curr_open=float(curr_open),
+        curr_close=float(curr_close),
+        change_3m_pct=float(change_3m_pct),
+        rsi=float(rsi),
+        macd_hist_last=float(macd_hist_last),
+        macd_hist_prev=float(macd_hist_prev),
+        close=float(close),
+        sma20=float(sma20),
+    )
+
+
+def combo_from_features(feat: ComboFeatures, cfg: dict[str, Any] | None = None) -> str:
+    _ = cfg or {}
+    combo_tokens: list[str] = []
+    if feat.prev_close < feat.prev_open and feat.curr_close > feat.curr_open:
+        combo_tokens.append('R1+G')
+    combo_tokens.append('G' if feat.curr_close >= feat.curr_open else 'R')
+    combo_tokens.append('!D' if feat.change_3m_pct > -1.0 else 'D')
+    if 25.0 <= feat.rsi <= 65.0:
+        combo_tokens.append('RSIN')
+    elif feat.rsi < 25.0:
+        combo_tokens.append('RSIL')
+    else:
+        combo_tokens.append('RSIH')
+    combo_tokens.append('MACDup' if feat.macd_hist_last >= feat.macd_hist_prev else 'MACDdn')
+    combo_tokens.append('SMAabv' if feat.close >= feat.sma20 else 'SMAbel')
+    return '|'.join(combo_tokens)
+
+
 def _get_json(path: str, params: dict[str, Any] | None = None, timeout: int = 15):
     url = f'{BINANCE_BASE}{path}'
     response = SESSION.get(url, params=params or {}, timeout=timeout)
@@ -260,22 +319,21 @@ def analyze_symbol(symbol: str, cfg: dict[str, Any], knife_cfg: dict[str, Any]) 
     ema_spread_pct = float(((ema7.iloc[-1] - ema25.iloc[-1]) / last_close) * 100) if last_close else 0.0
     trend = 'UP' if ema7.iloc[-1] > ema25.iloc[-1] > ema99.iloc[-1] and last_close > ema7.iloc[-1] else 'MIX'
 
-    combo_tokens: list[str] = []
-    if prev_close < prev_open and curr_close > curr_open:
-        combo_tokens.append('R1+G')
-    combo_tokens.append('G' if curr_close >= curr_open else 'R')
-    combo_tokens.append('!D' if change_3m_pct > -1.0 else 'D')
-    if 25.0 <= last_rsi <= 65.0:
-        combo_tokens.append('RSIN')
-    elif last_rsi < 25.0:
-        combo_tokens.append('RSIL')
-    else:
-        combo_tokens.append('RSIH')
     macd_prev = float(macd_hist.iloc[-2]) if len(macd_hist) > 1 else last_macd_hist
-    combo_tokens.append('MACDup' if last_macd_hist >= macd_prev else 'MACDdn')
     last_sma20 = float(sma20.iloc[-1]) if pd.notna(sma20.iloc[-1]) else last_close
-    combo_tokens.append('SMAabv' if last_close >= last_sma20 else 'SMAbel')
-    combo_key = '|'.join(combo_tokens)
+    feat = build_combo_features(
+        prev_open=prev_open,
+        prev_close=prev_close,
+        curr_open=curr_open,
+        curr_close=curr_close,
+        change_3m_pct=change_3m_pct,
+        rsi=last_rsi,
+        macd_hist_last=last_macd_hist,
+        macd_hist_prev=macd_prev,
+        close=last_close,
+        sma20=last_sma20,
+    )
+    combo_key = combo_from_features(feat, cfg)
     print(f'[SCREENER_DEBUG] {symbol} generated combo_key={combo_key}')
 
     effective_rsi_max = 40.0
