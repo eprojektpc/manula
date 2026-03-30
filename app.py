@@ -30,6 +30,7 @@ _COMBO_DB_PATH = '/root/screener-bot/screener.db'
 _COMBO_CACHE_TTL_SEC = 30.0
 _COMBO_CACHE_LOCK = threading.Lock()
 _COMBO_CACHE: dict[str, Any] = {'expires_at': 0.0, 'table': None, 'column_map': None}
+_SCAN_COMBO_TOKEN = os.environ.get('SCAN_COMBO_TOKEN', 'tajnytoken123')
 
 
 def utc_now_iso() -> str:
@@ -505,17 +506,12 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
     if not candidates:
         return {'ok': False, 'slot': slot, 'scan_time': scan_time, 'message': 'Brak kandydatów dla slotu.'}
 
-    preferred_symbol, reserved_symbols = _preferred_and_reserved_symbols(slot)
     slot_cfg = _slot_settings_map().get(int(slot), {})
     selected: dict[str, Any] | None = None
+    combo_rows_found = 0
 
-    def _candidate_priority(item: dict[str, Any]) -> tuple[int, int, float, float, float]:
-        sym = str(item.get('symbol') or '').upper().strip()
-        preferred_rank = 1 if preferred_symbol and sym == preferred_symbol else 0
-        reserved_rank = 0 if sym in reserved_symbols else 1
+    def _candidate_priority(item: dict[str, Any]) -> tuple[float, float, float]:
         return (
-            preferred_rank,
-            reserved_rank,
             float(item.get('hit_tp_rate') or 0.0),
             float(item.get('wilson') or 0.0),
             float(item.get('avg_max_profit') or 0.0),
@@ -535,6 +531,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         combo_stats = _fetch_combo_stats(combo_key)
         if not combo_stats:
             continue
+        combo_rows_found += 1
 
         hit_rate_fraction = _normalize_rate_to_fraction(combo_stats.get('hit_tp_rate'))
         sample_size = int(float(combo_stats.get('n') or 0))
@@ -567,6 +564,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
             'message': 'Brak par spełniających warunki combo.',
             'min_combo_rate': min_combo_rate,
             'min_sample': min_sample,
+            'combo_rows_found': combo_rows_found,
         }
 
     symbol = str(selected['symbol'])
@@ -611,7 +609,15 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         'last_ts': selected.get('last_ts'),
         'scan_time': scan_time,
         'message': f'Wybrano {symbol} na podstawie combo.',
+        'combo_rows_found': combo_rows_found,
     }
+
+
+def _is_scan_combo_authorized() -> bool:
+    if is_authenticated():
+        return True
+    token = str(request.args.get('token') or request.headers.get('X-API-Token') or '').strip()
+    return bool(token and token == _SCAN_COMBO_TOKEN)
 
 
 def _combo_message_and_level(combo: dict[str, Any] | None) -> tuple[str, str]:
@@ -1020,9 +1026,13 @@ def api_slot_scan(slot: int):
 
 
 @app.route('/api/scan_combo_for_slot', methods=['POST'])
-@login_required
 def scan_combo_for_slot():
     try:
+        if not _is_scan_combo_authorized():
+            print('[scan_combo_for_slot] auth failed')
+            return jsonify({'ok': False, 'success': False, 'error': 'Brak autoryzacji'}), 401
+        print('[scan_combo_for_slot] auth passed')
+
         data = request.get_json(force=True, silent=True) or {}
         cfg = load_config()
         slot_count = int(cfg['trading']['slot_count'])
@@ -1043,6 +1053,7 @@ def scan_combo_for_slot():
             raise ValueError('min_sample nie może być ujemne.')
 
         interval = str(data.get('interval') or '1m').strip() or '1m'
+        print(f'[scan_combo_for_slot] db path used: {_COMBO_DB_PATH}')
         print('COMBO API CALLED', slot, min_combo_rate, min_sample)
 
         with _SCAN_LOCK:
@@ -1052,6 +1063,8 @@ def scan_combo_for_slot():
                 min_sample=min_sample,
                 interval=interval,
             )
+        print(f'[scan_combo_for_slot] combo rows found: {result.get("combo_rows_found", 0)}')
+        print(f'[scan_combo_for_slot] selected symbol: {result.get("symbol")}')
 
         http_code = 200 if result.get('ok') else 404
         result['success'] = bool(result.get('ok'))
