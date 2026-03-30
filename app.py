@@ -360,35 +360,6 @@ def _markers_for_symbol(symbol: str) -> list[dict[str, Any]]:
     return markers
 
 
-def _rsi_bucket(rsi_value: float) -> str:
-    if rsi_value < 30:
-        return 'lt30'
-    if rsi_value < 40:
-        return '30_39'
-    if rsi_value < 50:
-        return '40_49'
-    if rsi_value < 60:
-        return '50_59'
-    if rsi_value < 70:
-        return '60_69'
-    return 'ge70'
-
-
-def _fuel_bucket(fuel_score: float) -> str:
-    if fuel_score >= 2.3:
-        return 'high'
-    if fuel_score >= 1.0:
-        return 'mid'
-    return 'low'
-
-
-def _build_combo_key(payload: dict[str, Any]) -> str:
-    pattern_name = str((payload.get('pattern') or {}).get('name') or 'none').strip().lower()
-    fuel_score = float((payload.get('fuel') or {}).get('score') or 0.0)
-    rsi_value = float(payload.get('rsi_value') or 50.0)
-    return f'pattern={pattern_name}|fuel={_fuel_bucket(fuel_score)}|rsi={_rsi_bucket(rsi_value)}'
-
-
 def _fetch_combo_stats_from_recommendations(combo_key: str) -> dict[str, Any] | None:
     if not os.path.exists(_COMBO_DB_PATH):
         return None
@@ -416,7 +387,7 @@ def _fetch_combo_stats_from_recommendations(combo_key: str) -> dict[str, Any] | 
             hit_tp_rate = hits / n
             avg_max_profit = float(row['avg_max_profit']) if row['avg_max_profit'] is not None else None
 
-            print(f'[combo] key={combo_key} n={n} hit_rate={hit_tp_rate}')
+            print(f'[COMBO_STATS] n={n}, hit_rate={hit_tp_rate}')
             return {
                 'n': n,
                 'hit_tp_rate': hit_tp_rate,
@@ -453,10 +424,9 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
     selected: dict[str, Any] | None = None
     combo_rows_found = 0
 
-    def _candidate_priority(item: dict[str, Any]) -> tuple[float, float, float]:
+    def _candidate_priority(item: dict[str, Any]) -> tuple[float, float]:
         return (
             float(item.get('hit_tp_rate') or 0.0),
-            float(item.get('wilson') or 0.0),
             float(item.get('avg_max_profit') or 0.0),
         )
 
@@ -465,12 +435,11 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         if not symbol:
             continue
 
-        try:
-            chart = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
-        except Exception:
+        combo_key = str(row.get('combo_key') or '').strip()
+        if not combo_key:
             continue
 
-        combo_key = _build_combo_key(chart)
+        print(f'[COMBO] {symbol} → {combo_key}')
         combo_stats = _fetch_combo_stats_from_recommendations(combo_key)
         if not combo_stats:
             continue
@@ -511,15 +480,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         }
 
     symbol = str(selected['symbol'])
-    storage.upsert_slot_setting(
-        slot=slot,
-        symbol=symbol,
-        budget=slot_cfg.get('budget'),
-        tp_pct=slot_cfg.get('tp_pct'),
-        sl_pct=slot_cfg.get('sl_pct'),
-        auto_enabled=slot_cfg.get('auto_enabled'),
-        updated_at=scan_time,
-    )
+    storage.upsert_slot_setting(slot, scan_time, symbol=symbol)
 
     storage.save_slot_scan_result(
         slot,
@@ -602,8 +563,8 @@ def _combo_message_and_level(combo: dict[str, Any] | None) -> tuple[str, str]:
 
 
 def _attach_combo_signal(payload: dict[str, Any]) -> dict[str, Any]:
-    combo_key = _build_combo_key(payload)
-    combo_stats = _fetch_combo_stats_from_recommendations(combo_key)
+    combo_key = str(payload.get('combo_key') or '').strip()
+    combo_stats = _fetch_combo_stats_from_recommendations(combo_key) if combo_key else None
     message, level = _combo_message_and_level(combo_stats)
 
     payload['combo_signal'] = {

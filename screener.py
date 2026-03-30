@@ -30,6 +30,7 @@ class Candidate:
     range_position: float
     trend: str
     note: str
+    combo_key: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +45,7 @@ class Candidate:
             'range_position': round(self.range_position, 4),
             'trend': self.trend,
             'note': self.note,
+            'combo_key': self.combo_key,
         }
 
 
@@ -308,21 +310,25 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
     allowed_symbols = set(fetch_symbols(quote_asset))
     effective_min_quote_volume = min(float(scanner.get('min_quote_volume', 0.0)), 100000.0)
 
-    prefilter_rows: list[tuple[str, float]] = []
+    prefilter_rows: list[tuple[str, float, str | None]] = []
     for row in tickers:
         symbol = str(row.get('symbol', ''))
         if symbol not in allowed_symbols or symbol in blacklist:
             continue
         quote_volume = float(row.get('quoteVolume') or 0.0)
-        prefilter_rows.append((symbol, quote_volume))
+        combo_key = row.get('combo_key')
+        combo_key_value = str(combo_key).strip() if combo_key is not None else None
+        prefilter_rows.append((symbol, quote_volume, combo_key_value))
 
-    universe: list[tuple[str, float]] = [(symbol, qv) for symbol, qv in prefilter_rows if qv >= effective_min_quote_volume]
+    universe: list[tuple[str, float, str | None]] = [(symbol, qv, combo_key) for symbol, qv, combo_key in prefilter_rows if qv >= effective_min_quote_volume]
     if not universe and prefilter_rows:
         universe = prefilter_rows[: min(20, len(prefilter_rows))]
 
     top_limit = max(20, int(scanner.get('top_volume_limit', 50)))
     universe.sort(key=lambda x: x[1], reverse=True)
-    top_symbols = [sym for sym, _ in universe[:top_limit]]
+    top_entries = universe[:top_limit]
+    top_symbols = [sym for sym, _, _ in top_entries]
+    combo_map = {sym: combo_key for sym, _, combo_key in top_entries}
     if not top_symbols:
         raise ScreenerError('Brak par spełniających minimalną płynność.')
 
@@ -342,10 +348,15 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
 
     candidates.sort(key=lambda x: x.score, reverse=True)
     target_pairs = min(10, max(3, int(scanner.get('top_pairs', 5))))
-    selected = [c.as_dict() for c in candidates[:target_pairs]]
+    selected = []
+    for c in candidates[:target_pairs]:
+        row = c.as_dict()
+        if row.get('combo_key') is None:
+            row['combo_key'] = combo_map.get(c.symbol)
+        selected.append(row)
 
     if len(selected) < target_pairs:
-        selected_symbols_set = {c['symbol'] for c in selected}
+        selected_symbols_set = {str(c.get('symbol')) for c in selected}
         missing = target_pairs - len(selected)
         fallback_symbols = [sym for sym in top_symbols if sym not in selected_symbols_set][:missing]
         for sym in fallback_symbols:
@@ -361,6 +372,7 @@ def run_scan(config: dict[str, Any]) -> list[dict[str, Any]]:
                 'range_position': 0.0,
                 'trend': 'MIX',
                 'note': 'fallback_liquidity_candidate',
+                'combo_key': combo_map.get(sym),
             })
     return selected
 
