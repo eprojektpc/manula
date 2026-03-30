@@ -378,10 +378,12 @@ def _fetch_combo_stats_from_recommendations(combo_key: str) -> dict[str, Any] | 
             conn.row_factory = sqlite3.Row
             row = conn.execute(query, (combo_key,)).fetchone()
             if not row:
+                print(f'[COMBO_STATS] combo_key={combo_key} query_returned_no_row')
                 return None
 
             n = int(row['n'] or 0)
             if n == 0:
+                print(f'[COMBO_STATS] combo_key={combo_key} rows_found=0')
                 return None
 
             hits = int(row['hits'] or 0)
@@ -397,6 +399,8 @@ def _fetch_combo_stats_from_recommendations(combo_key: str) -> dict[str, Any] | 
                 'hits_tp': hits,
             }
     except Exception:
+        print(f'[COMBO_STATS] combo_key={combo_key} exception while reading recommendations:')
+        print(traceback.format_exc())
         return None
 
 
@@ -421,14 +425,8 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         return {'ok': False, 'slot': slot, 'scan_time': scan_time, 'message': 'Brak kandydatów dla slotu.'}
 
     slot_cfg = _slot_settings_map().get(int(slot), {})
-    selected: dict[str, Any] | None = None
+    eligible_candidates: list[dict[str, Any]] = []
     combo_rows_found = 0
-
-    def _candidate_priority(item: dict[str, Any]) -> tuple[float, float]:
-        return (
-            float(item.get('hit_tp_rate') or 0.0),
-            float(item.get('avg_max_profit') or 0.0),
-        )
 
     for row in candidates:
         symbol = str(row.get('symbol') or '').upper().strip()
@@ -437,6 +435,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
 
         combo_key = str(row.get('combo_key') or '').strip()
         if not combo_key:
+            print(f'[COMBO_SCAN] symbol={symbol} combo_key=EMPTY (skipping)')
             continue
 
         print(f'[COMBO_SCAN] symbol={symbol} combo_key={combo_key}')
@@ -456,7 +455,7 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
         if min_sample is not None and sample_size < int(min_sample):
             continue
 
-        candidate = {
+        eligible_candidates.append({
             'symbol': symbol,
             'combo_key': combo_key,
             'hit_tp_rate': combo_stats.get('hit_tp_rate'),
@@ -466,12 +465,9 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
             'n': combo_stats.get('n'),
             'scan_row': row,
             'scan_time': scan_time,
-        }
+        })
 
-        if selected is None or _candidate_priority(candidate) > _candidate_priority(selected):
-            selected = candidate
-
-    if not selected:
+    if not eligible_candidates:
         return {
             'ok': False,
             'slot': slot,
@@ -481,6 +477,15 @@ def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: 
             'min_sample': min_sample,
             'combo_rows_found': combo_rows_found,
         }
+
+    eligible_candidates.sort(
+        key=lambda item: (
+            float(item.get('hit_tp_rate') or 0.0),
+            float(item.get('avg_max_profit') or 0.0),
+        ),
+        reverse=True,
+    )
+    selected = eligible_candidates[0]
 
     symbol = str(selected['symbol'])
     print(f'[COMBO_SCAN] final selected symbol={symbol} combo_key={selected.get("combo_key")}')
@@ -980,15 +985,13 @@ def scan_combo_for_slot():
         print(f'[scan_combo_for_slot] combo rows found: {result.get("combo_rows_found", 0)}')
         print(f'[scan_combo_for_slot] selected symbol: {result.get("symbol")}')
 
-        http_code = 200 if result.get('ok') else 404
         result['success'] = bool(result.get('ok'))
         result['slot_id'] = slot
-        return jsonify(result), http_code
+        return jsonify(result), 200
     except Exception as exc:
-        code = 400 if isinstance(exc, ValueError) else 500
         print('[scan_combo_for_slot] exception:')
         print(traceback.format_exc())
-        return jsonify({'success': False, 'ok': False, 'error': str(exc)}), code
+        return jsonify({'success': False, 'ok': False, 'error': str(exc)}), 200
 
 
 @app.route('/api/buy', methods=['POST'])
