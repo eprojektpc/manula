@@ -91,21 +91,41 @@ def build_combo_features(
 
 
 def combo_from_features(feat: ComboFeatures, cfg: dict[str, Any] | None = None) -> str:
-    _ = cfg or {}
+    _ = cfg
     combo_tokens: list[str] = []
-    if feat.prev_close < feat.prev_open and feat.curr_close > feat.curr_open:
-        combo_tokens.append('R1+G')
+
+    # === świeca ===
+    if feat.curr_close >= feat.curr_open:
         combo_tokens.append('G')
-    combo_tokens.append('!D' if feat.change_3m_pct > -1.0 else 'D')
-    if 25.0 <= feat.rsi <= 65.0:
-        combo_tokens.append('RSIN')
-    elif feat.rsi < 25.0:
-        combo_tokens.append('RSIL')
     else:
+        combo_tokens.append('R')
+
+    # === engulf ===
+    if feat.prev_close < feat.prev_open and feat.curr_close > feat.curr_open:
+        combo_tokens.insert(0, 'R1+G')
+
+    # === trend ===
+    combo_tokens.append('!D' if feat.change_3m_pct > -1.0 else 'D')
+
+    # === RSI ===
+    if feat.rsi < 40:
+        combo_tokens.append('RSIN')
+    elif feat.rsi > 60:
         combo_tokens.append('RSIH')
+    else:
+        combo_tokens.append('RSI0')
+
+    # === MACD ===
     combo_tokens.append('MACDup' if feat.macd_hist_last >= feat.macd_hist_prev else 'MACDdn')
+
+    # === SMA ===
     combo_tokens.append('SMAabv' if feat.close >= feat.sma20 else 'SMAbel')
-    return '|'.join(token for token in combo_tokens if token)
+
+    # === REV (ważne!) ===
+    if abs(feat.change_3m_pct) > 2.0:
+        combo_tokens.append('REV')
+
+    return '|'.join(combo_tokens)
 
 
 def _get_json(path: str, params: dict[str, Any] | None = None, timeout: int = 15):
