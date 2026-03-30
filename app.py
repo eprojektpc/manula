@@ -485,6 +485,135 @@ def _fetch_combo_stats(combo_key: str) -> dict[str, Any] | None:
         return None
 
 
+def _normalize_rate_to_fraction(rate_value: Any) -> float:
+    rate = float(rate_value or 0.0)
+    return rate / 100.0 if rate > 1.0 else rate
+
+
+def _scan_best_symbol_by_combo(*, slot: int, min_combo_rate: float, min_sample: int | None = None, interval: str = '1m') -> dict[str, Any]:
+    cfg = load_config()
+    candidates = run_scan(cfg)
+    scan_time = utc_now_iso()
+    run_status = 'OK' if candidates else 'EMPTY'
+    storage.save_scan_results(
+        scan_time,
+        run_status,
+        candidates,
+        meta={'quote_asset': cfg['trading']['quote_asset'], 'source': f'combo_slot_{slot}'},
+    )
+
+    if not candidates:
+        return {'ok': False, 'slot': slot, 'scan_time': scan_time, 'message': 'Brak kandydatów dla slotu.'}
+
+    preferred_symbol, reserved_symbols = _preferred_and_reserved_symbols(slot)
+    slot_cfg = _slot_settings_map().get(int(slot), {})
+    selected: dict[str, Any] | None = None
+
+    def _candidate_priority(item: dict[str, Any]) -> tuple[int, int, float, float, float]:
+        sym = str(item.get('symbol') or '').upper().strip()
+        preferred_rank = 1 if preferred_symbol and sym == preferred_symbol else 0
+        reserved_rank = 0 if sym in reserved_symbols else 1
+        return (
+            preferred_rank,
+            reserved_rank,
+            float(item.get('hit_tp_rate') or 0.0),
+            float(item.get('wilson') or 0.0),
+            float(item.get('avg_max_profit') or 0.0),
+        )
+
+    for row in candidates:
+        symbol = str(row.get('symbol') or '').upper().strip()
+        if not symbol:
+            continue
+
+        try:
+            chart = build_chart_payload(symbol, interval=interval, fuel_cfg=cfg.get('fuel', {}))
+        except Exception:
+            continue
+
+        combo_key = _build_combo_key(chart)
+        combo_stats = _fetch_combo_stats(combo_key)
+        if not combo_stats:
+            continue
+
+        hit_rate_fraction = _normalize_rate_to_fraction(combo_stats.get('hit_tp_rate'))
+        sample_size = int(float(combo_stats.get('n') or 0))
+        if hit_rate_fraction < min_combo_rate:
+            continue
+        if min_sample is not None and sample_size < int(min_sample):
+            continue
+
+        candidate = {
+            'symbol': symbol,
+            'combo_key': combo_key,
+            'hit_tp_rate': combo_stats.get('hit_tp_rate'),
+            'hits_tp': combo_stats.get('hits_tp'),
+            'avg_max_profit': combo_stats.get('avg_max_profit'),
+            'wilson': combo_stats.get('wilson'),
+            'n': combo_stats.get('n'),
+            'last_ts': combo_stats.get('last_ts'),
+            'scan_row': row,
+            'scan_time': scan_time,
+        }
+
+        if selected is None or _candidate_priority(candidate) > _candidate_priority(selected):
+            selected = candidate
+
+    if not selected:
+        return {
+            'ok': False,
+            'slot': slot,
+            'scan_time': scan_time,
+            'message': 'Brak par spełniających warunki combo.',
+            'min_combo_rate': min_combo_rate,
+            'min_sample': min_sample,
+        }
+
+    symbol = str(selected['symbol'])
+    storage.upsert_slot_setting(
+        slot=slot,
+        symbol=symbol,
+        budget=slot_cfg.get('budget'),
+        tp_pct=slot_cfg.get('tp_pct'),
+        sl_pct=slot_cfg.get('sl_pct'),
+        auto_enabled=slot_cfg.get('auto_enabled'),
+        updated_at=scan_time,
+    )
+
+    storage.save_slot_scan_result(
+        slot,
+        {
+            'status': 'OK',
+            'symbol': symbol,
+            'scan_time': scan_time,
+            'source': 'combo',
+            'message': 'Wybrano symbol na podstawie combo.',
+            'combo_key': selected.get('combo_key'),
+            'hit_tp_rate': selected.get('hit_tp_rate'),
+            'wilson': selected.get('wilson'),
+            'n': selected.get('n'),
+            'avg_max_profit': selected.get('avg_max_profit'),
+            'candidate': selected.get('scan_row'),
+        },
+        scan_time,
+    )
+
+    return {
+        'ok': True,
+        'slot': slot,
+        'symbol': symbol,
+        'combo_key': selected.get('combo_key'),
+        'hit_tp_rate': selected.get('hit_tp_rate'),
+        'hits_tp': selected.get('hits_tp'),
+        'wilson': selected.get('wilson'),
+        'n': selected.get('n'),
+        'avg_max_profit': selected.get('avg_max_profit'),
+        'last_ts': selected.get('last_ts'),
+        'scan_time': scan_time,
+        'message': f'Wybrano {symbol} na podstawie combo.',
+    }
+
+
 def _combo_message_and_level(combo: dict[str, Any] | None) -> tuple[str, str]:
     if not combo:
         return 'Combo: brak danych historycznych', 'none'
@@ -888,6 +1017,42 @@ def api_slot_scan(slot: int):
         )
 
     return jsonify({'ok': True, 'slot': slot, 'symbol': best_symbol, 'candidate': best, 'scan_time': scan_time})
+
+
+@app.route('/api/scan_combo_for_slot', methods=['POST'])
+@login_required
+def api_scan_combo_for_slot():
+    data = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    slot_count = int(cfg['trading']['slot_count'])
+    slot = int(data.get('slot_id') or 0)
+    if slot < 1 or slot > slot_count:
+        raise ValueError(f'Nieprawidłowy slot. Użyj 1..{slot_count}.')
+
+    min_combo_rate_input = parse_optional_float(data.get('min_combo_rate'), 'min_combo_rate')
+    min_combo_rate = float(min_combo_rate_input if min_combo_rate_input is not None else 0.5)
+    if min_combo_rate > 1.0:
+        min_combo_rate /= 100.0
+    if min_combo_rate < 0 or min_combo_rate > 1:
+        raise ValueError('min_combo_rate musi być z zakresu 0..1 lub 0..100%.')
+
+    min_sample_input = parse_optional_float(data.get('min_sample'), 'min_sample')
+    min_sample = int(min_sample_input) if min_sample_input is not None else None
+    if min_sample is not None and min_sample < 0:
+        raise ValueError('min_sample nie może być ujemne.')
+
+    interval = str(data.get('interval') or '1m').strip() or '1m'
+
+    with _SCAN_LOCK:
+        result = _scan_best_symbol_by_combo(
+            slot=slot,
+            min_combo_rate=min_combo_rate,
+            min_sample=min_sample,
+            interval=interval,
+        )
+
+    http_code = 200 if result.get('ok') else 404
+    return jsonify(result), http_code
 
 
 @app.route('/api/buy', methods=['POST'])
