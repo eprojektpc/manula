@@ -187,8 +187,6 @@ class PositionMonitor(threading.Thread):
                 try:
                     slot = int(pos['slot'])
                     setting = slot_settings.get(slot, {})
-                    if not bool(setting.get('auto_enabled')):
-                        continue
 
                     price = float(get_price(pos['symbol']) or 0.0)
                     if price <= 0:
@@ -200,6 +198,9 @@ class PositionMonitor(threading.Thread):
 
                     tp_pct = float(pos.get('tp_pct') or 0.0)
                     sl_pct = float(pos.get('sl_pct') or 0.0)
+                    if not bool(setting.get('auto_enabled')):
+                        continue
+
                     if tp_pct > 0 and pnl_pct >= tp_pct:
                         execute_sell(slot=slot, reason='AUTO_TP')
                     elif sl_pct > 0 and pnl_pct <= (-sl_pct):
